@@ -129,7 +129,7 @@ static void run_ex2(void) {
         int t = a[i]; //read
         t *= 2;       // modify
         t += 2;       // modify
-        a[i] += t;    // write
+        a[i] = t;    // write
       }
       _exit(0);
     }
