@@ -127,8 +127,9 @@ static void run_ex2(void) {
     if (pid == 0) {
       for (int i = 0; i < N; i++) {
         int t = a[i]; //read
-        a[i] = t * 2; // write
-        a[i] += 2;    // write
+        t *= 2;       // modify
+        t += 2;       // modify
+        a[i] += t;    // write
       }
       _exit(0);
     }
@@ -141,7 +142,7 @@ static void run_ex2(void) {
   }
 
   int first = a[0], minv = a[0], maxv = a[0];
-  int sum = 0;
+  long long sum = 0;
   for (int i = 0; i < N; i++) {
     if (a[i] < minv)
       minv = a[i];
