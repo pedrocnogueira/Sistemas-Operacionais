@@ -19,12 +19,12 @@ int main(int argc, char *argv[]) {
   pid_t pid;
   int delay;
 
-  if (argc < 3) {
+  if (argc < 2) {
     fprintf(stderr, "Uso: %s tempo programafilho [arg1 ... argn]\n", argv[0]);
     exit(1);
   }
 
-  // instala tratador para SIGCHLD (como no slide)
+  // instala tratador para SIGCHLD
   signal(SIGCHLD, childhandler);
 
   pid = fork();
@@ -34,11 +34,8 @@ int main(int argc, char *argv[]) {
   }
 
   if (pid == 0) {
-    // ----- FILHO -----
-    // substitui o processo pelo programa-filho (forma do slide)
-    // argv[2] é o executável; argv+2 vira o vetor de args do filho
-    execvp(argv[2], &argv[2]);
-    perror("execvp"); // se chegou aqui, exec falhou
+    // ---- FILHO ----
+    for(;;);
     exit(1);
   } else {
     // ----- PAI -----
@@ -47,8 +44,7 @@ int main(int argc, char *argv[]) {
 
     // se o filho já terminou, o handler acima já terá finalizado o pai.
     // se ainda não terminou, mata o filho com SIGKILL (como no slide).
-    printf("Tempo limite (%d s) esgotado. Enviando SIGKILL ao filho %d.\n",
-           delay, (int)pid);
+    printf("Tempo limite (%d s) esgotado. Enviando SIGKILL ao filho %d.\n", delay, (int)pid);
     fflush(stdout);
     kill(pid, SIGKILL);
 
