@@ -35,7 +35,9 @@ int main(int argc, char *argv[]) {
 
   if (pid == 0) {
     // ---- FILHO ----
+    printf("Filho dormindo...\n");
     sleep(3);
+    printf("Filho acordou.\n");
     exit(1);
   } else {
     // ----- PAI -----
