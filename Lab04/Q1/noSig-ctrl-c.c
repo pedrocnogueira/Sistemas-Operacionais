@@ -17,14 +17,10 @@ void quitHandler(int sinal) {
 }
 
 int main(void) {
-  void (*p)(int);
 
-  p = signal(SIGINT, intHandler);
-  printf("Endereco do manipulador anterior de SIGINT: %p\n", (void *)p);
+  // signal(SIGINT, intHandler);
+  // signal(SIGQUIT, quitHandler);
 
-  p = signal(SIGQUIT, quitHandler);
-  printf("Endereco do manipulador anterior de SIGQUIT: %p\n", (void *)p);
-
-  puts("Ctrl-C tratado (nao termina). Use Ctrl-\\ para terminar.");
+  puts("Signals comentados.\n");
   EVER;
 }
