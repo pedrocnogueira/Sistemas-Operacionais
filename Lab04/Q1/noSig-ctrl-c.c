@@ -3,8 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define EVER for (;;)
-
 void intHandler(int sinal) {
   printf("Voce pressionou Ctrl-C (SIGINT=%d)\n", sinal);
   fflush(stdout);
@@ -22,5 +20,5 @@ int main(void) {
   // signal(SIGQUIT, quitHandler);
 
   puts("Signals comentados.\n");
-  EVER;
+  for (;;);
 }
