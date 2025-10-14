@@ -1,0 +1,204 @@
+# SO – Trabalho 1 (Simulador de Escalonador com Sinais, Filas e I/O)
+
+Este documento explica **como o projeto está organizado**, **o que cada arquivo faz**, **como as peças se conectam** e **como isso mapeia para os conceitos e exigências do trabalho** (processos, sinais, interrupções, filas de prontos/espera/terminados, troca de contexto e I/O).
+
+> **Resumo em 1 frase:** Você vai rodar um mini‑SO: um **KernelSim** que escala **processos de usuário (A1..An)** em **Round‑Robin** com **quantum de 1s (IRQ0)**, move processos para **espera de I/O** quando eles pedem uma syscall fake e, **após 3s (IRQ1)**, devolve para prontos — tudo orquestrado com **sinais**, **memória compartilhada** e **filas**.
+
+---
+
+## 1) Estrutura de pastas
+
+```
+so-trab1/
+├── Makefile
+├── include/
+│   └── common.h
+└── src/
+    ├── launcher.c
+    ├── kernelsim.c
+    ├── interctl.c
+    └── app.c
+```
+
+- **`include/common.h`**: Tipos, constantes, estruturas (PCB, filas) e definições de sinais usados por todos.
+- **`src/launcher.c`**: Processo **pai**. Cria memória compartilhada, inicializa as filas e **lança** (via `fork/exec`) o **KernelSim**, o **InterControllerSim** e os **apps A1..An**.
+- **`src/kernelsim.c`**: Processo que simula o **kernel/escalonador**. Mantém as **filas** (prontos, espera, terminados), executa a **troca de contexto** usando `SIGSTOP/SIGCONT`, trata as **interrupções** `IRQ0` (timer) e `IRQ1` (fim de I/O) e recebe a **syscall fake** dos apps.
+- **`src/interctl.c`**: Processo **controlador de interrupções**. Gera **IRQ0** periodicamente (timer) e, quando o Kernel pede, agenda **IRQ1** para simular o término de I/O após 3s.
+- **`src/app.c`**: Executável dos **processos de usuário (netos)**. Cada A_i tem um **PC** que incrementa a cada segundo e, em certos valores de PC, **pede I/O** (syscall fake) — isso força a ida para a **fila de espera**.
+
+---
+
+## 2) Como compilar e executar
+
+```bash
+# dentro de so-trab1/
+make          # compila todos os binários
+./launcher    # executa o sistema (pai que lança kernel, inter e apps)
+```
+
+> **Dica:** Abra dois terminais. Em um, rode `./launcher`. No outro, use `htop`/`ps` pra observar os processos ou `strace -p <pid>` (opcional) para inspecionar sinais. Os logs do KernelSim aparecem no **stderr**, com timestamps.
+
+---
+
+## 3) Conceitos do trabalho e mapeamento para o código
+
+### 3.1 Processos e papéis
+- **Pai (`launcher`)**: prepara o ambiente (SHM, filas) e inicia todos os demais. Ele **não** faz escalonamento.
+- **KernelSim (`kernelsim`)**: é o **escalonador**. Decide **quem roda** (fila de prontos), **quem bloqueia** (fila de espera), **quem terminou** (fila de terminados). Faz **preempção** e **troca de contexto**.
+- **InterControllerSim (`interctl`)**: gera **interrupções**:
+  - **IRQ0**: a cada `QUANTUM_S` (1s), simula o **timer** → o Kernel preempta (`SIGSTOP` no atual) e despacha o próximo (`SIGCONT`).
+  - **IRQ1**: **fim de I/O** após `IO_TIME_S` (3s) quando solicitado pelo Kernel.
+- **Apps (`app`)**: **processos de usuário** (netos). Eles **não** tomam decisões de escalonamento; apenas **trabalham** (PC++) e **pedem I/O** em determinados tempos.
+
+### 3.2 Filas e estados
+- **Filas** (implementadas em `common.h`):
+  - `ready_q` (prontos): candidatos a rodar.
+  - `wait_q` (espera): aguardando I/O no dispositivo D1 (1 por vez, **FIFO**).
+  - `done_q` (terminados): finalizam a execução.
+- **Estados (enum `State`)**: `NEW`, `READY`, `RUNNING`, `WAIT_IO`, `DONE`.
+- **PCB (`struct PCB`)**: para cada app, guarda `pid`, `id`, `PC`, `st` (estado) e `wants_io` (flag de syscall fake).
+
+### 3.3 Troca de contexto (mecânica)
+- **Parar** o processo rodando: `SIGSTOP` → deixa de executar imediatamente.
+- **Salvar contexto**: o **PC** e o **estado** estão na **SHM**. O PC é incrementado pelo próprio app; o Kernel atualiza o `State` na tabela.
+- **Continuar** outro processo: `SIGCONT` no próximo da `ready_q` → passa a ser o **RUNNING**.
+
+### 3.4 Interrupções e sinais (política RR)
+- **IRQ0 (timer)**: gerado por `interctl` com `SIGALRM` **a cada 1s**.
+  - `kernelsim` recebe `SIGALRM` → handler `on_irq0`:
+    1. **Preempção** do atual (`SIGSTOP`) e volta para `ready_q`.
+    2. **Despacho** do próximo (`SIGCONT`).
+- **Syscall fake (pedido de I/O)**: o **app** envia `SIGUSR1` para o Kernel (`SIG_SYSC` no código).
+  - `kernelsim` recebe → handler `on_sysc`:
+    1. Move o **RUNNING** para `WAIT_IO` e o coloca na `wait_q`.
+    2. Se o **dispositivo D1** estiver livre, pede ao `interctl` para **agendar IRQ1** em `IO_TIME_S` (3s).
+    3. **Despacha** outro pronto.
+- **IRQ1 (fim de I/O)**: enviado pelo `interctl` após 3s.
+  - `kernelsim` recebe `SIGUSR2` → handler `on_irq1`:
+    1. Remove o primeiro da `wait_q`, muda para `READY` e enfileira em `ready_q`.
+    2. Se ainda houver alguém esperando, **inicia o próximo** (novo timer de 3s).
+    3. Se não houver **RUNNING**, despacha alguém.
+
+### 3.5 Linha do tempo (exemplo típico)
+```
+t=00s: DISPATCH → A1 (PC=0)
+t=01s: IRQ0     → PREEMPT A1; DISPATCH → A2
+t=02s: A2 PC=3  → SYSCALL (I/O); WAIT_IO(A2); I/O START(A2); DISPATCH → A3
+t=03s: IRQ0     → PREEMPT A3; DISPATCH → A1
+t=05s: IRQ1     → I/O DONE(A2) → READY; (se ninguém RUNNING) DISPATCH → A2
+...
+```
+
+---
+
+## 4) Detalhes por arquivo
+
+### 4.1 `include/common.h`
+- **Constantes**: `MAX_A`, `QUANTUM_S` (1s), `IO_TIME_S` (3s).
+- **Sinais mapeados**: `SIG_IRQ0 = SIGALRM`, `SIG_IRQ1 = SIGUSR2`, `SIG_SYSC = SIGUSR1`.
+- **Tipos**: `State`, `PCB`, `Queue`, `Shared`.
+- **Memória compartilhada (`Shared`)**: contém **tudo** que Kernel/Inter/Apps precisam (PCBs, filas, flags do dispositivo, PIDs dos serviços).
+
+### 4.2 `src/launcher.c`
+- Cria **SHM** (`shmget`, `shmat`), **zera**, inicializa `ready_q` com todos A’s como `READY`.
+- Exporta **`SO_SHMID`** via `setenv` para que **todos os filhos** anexem a mesma SHM.
+- Dá `fork/exec` de **`kernelsim`**, **`interctl`** e **N** vezes **`app`**.
+- Por fim, aguarda o **KernelSim** terminar para limpar a **SHM** com `shmctl(..., IPC_RMID, ...)`.
+
+### 4.3 `src/kernelsim.c`
+- **Handlers**:
+  - `on_irq0` (timer): preempção RR → tira o `RUNNING`, põe em `READY`, e despacha o próximo.
+  - `on_sysc` (syscall fake): move `RUNNING` para `WAIT_IO`, enfileira em `wait_q`, pede ao `interctl` para contar 3s (IRQ1) e despacha outro.
+  - `on_irq1` (fim I/O): retira o **primeiro** de `wait_q` para `READY` e, se há mais esperando, **inicia** o I/O seguinte.
+  - `on_chld`: se um app sair naturalmente, marca como `DONE` e evita zumbi.
+- **Dispatcher**: dá `SIGCONT` no escolhido e marca `RUNNING`.
+- **Preempção**: dá `SIGSTOP` no atual e o re-enfileira como `READY`.
+- **Laço principal**: `pause()` e encerra quando todos estiverem `DONE`.
+
+### 4.4 `src/interctl.c`
+- Instala handler de `SIGALRM` que **reagenda** `alarm(QUANTUM_S)` e envia `IRQ0` ao Kernel.
+- Ao receber `SIGUSR1` do Kernel (pedido de começar serviço de I/O), arma `alarm(IO_TIME_S)` e, ao disparar, envia `IRQ1` ao Kernel.
+
+### 4.5 `src/app.c`
+- Ao iniciar, faz `raise(SIGSTOP)` para **começar parado** até o Kernel selecioná‑lo.
+- Laço principal: `sleep(1)`, `PC++`. Em `PC==3` e `PC==8`, **pede I/O** (sinaliza Kernel com `SIG_SYSC`).
+- Encerra quando `PC` atinge `maxPC` → Kernel registra como `DONE` via `SIGCHLD`/`waitpid`.
+
+---
+
+## 5) Parâmetros, extensões e testes
+
+### 5.1 Ajustar tempos
+- Mude `QUANTUM_S` (tamanho da fatia) e `IO_TIME_S` (duração do I/O) em `common.h`.
+- Dica: para visualizar melhor, pode usar tempos menores (ex.: 200–300ms) trocando `alarm` por `setitimer` (opcional).
+
+### 5.2 Alterar pontos de I/O
+- Em `app.c`, ajuste os PCs que disparam I/O (ex.: `PC==2 || PC==5 || PC==9`).
+
+### 5.3 Número de apps
+- Em `common.h`, `USE_A` define quantos **apps** serão criados. Lembre de não ultrapassar `MAX_A`.
+
+### 5.4 Validações que o professor costuma cobrar
+- **Round‑Robin** real: trocas a cada IRQ0, usando `SIGSTOP/SIGCONT`.
+- **Fila de espera** é **FIFO** e **apenas um** acesso a D1 por vez.
+- **Retorno de I/O** (IRQ1) devolve o processo à **fila de prontos**.
+- **Contexto salvo**: PC atualizado na SHM e estado coerente.
+- **Sem processos zumbi**: `SIGCHLD` tratado e `waitpid` usado.
+- **Encerramento limpo**: ao terminar todos, SHM é desalocada.
+
+---
+
+## 6) Depuração e problemas comuns
+
+- “Nada acontece / tudo parado” → verifique se `interctl` está rodando (IRQ0). Use `ps` e `kill -SIGALRM <pid interctl>` manualmente para testar.
+- “Processo não volta do I/O” → checar se `on_irq1` está ligado ao **sinal certo** (`SIGUSR2`) e se `interctl` dispara `alarm(IO_TIME_S)`.
+- “Ninguém roda após preempção” → garantir que `ready_q` recebe de volta o antigo `RUNNING` e que `dispatch_next()` é chamado.
+- “Zumbis” → confirme o handler `SIGCHLD` e `waitpid(-1, &status, WNOHANG)`.
+- “SHM não fecha” → `shmctl(shmid, IPC_RMID, 0)` no `launcher` ao final.
+
+---
+
+## 7) Como isso atende ao enunciado
+
+- **Fila de prontos / espera / terminados**: implementadas com `Queue` na **SHM** e manipuladas pelo **KernelSim**.
+- **Troca de contexto**: `SIGSTOP/SIGCONT` + atualização de estado/PC na **SHM**.
+- **Interrupções**: `interctl` gera **IRQ0** (timer) e agenda **IRQ1** (fim de I/O) → `kernelsim` trata e decide.
+- **Syscall de I/O**: os apps **pedem** via sinal (`SIG_SYSC`); o Kernel move para **WAIT_IO** e coordena D1 por **fila**.
+- **Round‑Robin**: a cada **IRQ0**, o Kernel **preempta** e roda o próximo **READY**.
+
+---
+
+## 8) Checklist para entrega
+
+- [ ] `make` compila sem warnings (ou com o mínimo possível).
+- [ ] Execução mostra logs coerentes: **DISPATCH**, **PREEMPT**, **TRAP I/O**, **I/O START**, **I/O DONE**.
+- [ ] Todos os processos encerram; SHM é liberada.
+- [ ] README atualizado com **como rodar** e **mapa dos arquivos**.
+- [ ] (Opcional) **Relatório curto** com um diagrama de estados e uma linha do tempo real de execução.
+
+---
+
+## 9) Diagrama simplificado (ASCII)
+
+```
+           ┌─────────────┐       IRQ0 (1s)        ┌──────────────┐
+           │ InterCTL    ├────────────────────────►│  KernelSim   │
+           │ (timer +    │◄──────────────┐        │ (filas +     │
+           │  I/O 3s)    │   start I/O   │        │  dispatcher) │
+           └─────┬───────┘     pedido    │        └──────┬───────┘
+                 │                      ┌▼┐              │
+                 │                      │D│ I/O          │ SIGSTOP/SIGCONT
+                 │                      └▲┘              │
+                 │                       │               │
+                 │                       │               ▼
+              (SIGUSR1)             WAIT_Q (FIFO)   READY_Q (RR)
+Apps A_i ──► syscall fake
+(PC++/s;           │
+pedem I/O em       │  IRQ1(3s)
+PC==t)             ▼
+                 READY
+```
+
+---
+
+Qualquer ajuste que o professor peça (ex.: **política diferente**, **mais níveis de fila**, **semáforo/pipe** no lugar do sinal da syscall fake), dá para adaptar mantendo essa base. Se quiser, eu já deixo versões alternativas marcadas por `#define` no `common.h`.
