@@ -1,0 +1,10 @@
+[LAUNCHER] Sistema iniciado. Pressione Ctrl+C para interromper.
+[21:43:38] DISPATCH → A1 (st=RUNNING, PC=0)
+[21:43:39] PREEMPT  ← A1 (st=READY, PC=0)
+[21:43:39] DISPATCH → A2 (st=RUNNING, PC=0)
+[21:43:40] PREEMPT  ← A2 (st=READY, PC=0)
+[21:43:40] DISPATCH → A3 (st=RUNNING, PC=0)
+[21:43:41] PREEMPT  ← A3 (st=READY, PC=0)
+[21:43:41] DISPATCH → A1 (st=RUNNING, PC=0)
+[21:43:42] PREEMPT  ← A1 (st=READY, PC=0)
+[21:43:42] DISPATCH → A2 (st=RUNNING, PC=0)

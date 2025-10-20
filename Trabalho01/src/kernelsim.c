@@ -14,28 +14,99 @@ static void logevt(const char* what, int idx){
         fprintf(stderr,"[%s] %-10s\n", hhmmss, what);
 }
 
+// Logging detalhado para I/O
+static void log_io_cycle(const char* phase, int idx, int wait_q_size){
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] I/O %-8s A%d | Fila I/O: %d processos\n",
+        hhmmss, phase, shm->pcb[idx].id, wait_q_size);
+}
+
+
+// Log quando todos estão em DONE
+static void log_all_done(){
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] TODOS DONE | Ready: %d, Wait: %d, Done: %d\n",
+        hhmmss, shm->ready_q.size, shm->wait_q.size, shm->done_q.size);
+}
+
+
+// Verifica se todos os processos estão em DONE
+static void check_all_done(){
+    if(shm->done_q.size == shm->nprocs){
+        log_all_done();
+    }
+}
+
 // Despacha próximo da ready_q
 static void dispatch_next(){
-    if(running>=0){ // já tem alguém rodando
-        // nada aqui: preempção acontece nos handlers
-        return;
+    if(running>=0) return;
+    
+    while(1){
+        int idx = q_pop(&shm->ready_q);
+        if(idx<0) return; // fila vazia
+        
+        // CRÍTICO: Pula processos que já estão DONE
+        if(shm->pcb[idx].st == ST_DONE){
+            continue; // pega próximo
+        }
+        
+        // Verifica se processo ainda está vivo
+        if(kill(shm->pcb[idx].pid, 0) < 0){
+            // Processo morreu, marca e tenta próximo
+            shm->pcb[idx].st = ST_DONE;
+            q_push(&shm->done_q, idx);
+            logevt("DEAD     ", idx);
+            continue;
+        }
+        
+        // Processo válido, despacha
+        running = idx;
+        shm->pcb[idx].st = ST_RUNNING;
+        
+        if(kill(shm->pcb[idx].pid, SIGCONT) < 0){
+            perror("SIGCONT failed");
+            running = -1;
+            continue;
+        }
+        
+        logevt("DISPATCH →", idx);
+        break;
     }
-    int idx = q_pop(&shm->ready_q);
-    if(idx<0){ return; } // nada pronto
-    running = idx;
-    shm->pcb[idx].st = ST_RUNNING;
-    // Continua o processo (se for primeira vez, ainda está parado por default)
-    kill(shm->pcb[idx].pid, SIGCONT);
-    logevt("DISPATCH →", idx);
 }
 
 // Para quem está rodando e empilha de volta nos prontos
+// Para quem está rodando e empilha de volta nos prontos
 static void preempt_running(){
     if(running<0) return;
-    int idx=running; running=-1;
+    
+    int idx=running;
+    
+    // CRÍTICO: Se já está DONE, não preempta
+    if(shm->pcb[idx].st == ST_DONE){
+        running = -1;
+        return;
+    }
+    
+    // Verifica se processo ainda está vivo
+    if(kill(shm->pcb[idx].pid, 0) < 0){
+        // Processo morreu
+        shm->pcb[idx].st = ST_DONE;
+        q_push(&shm->done_q, idx);
+        running = -1;
+        logevt("DEAD     ", idx);
+        return;
+    }
+    
+    running=-1;
     shm->pcb[idx].st = ST_READY;
     q_push(&shm->ready_q, idx);
-    kill(shm->pcb[idx].pid, SIGSTOP);
+    
+    if(kill(shm->pcb[idx].pid, SIGSTOP) < 0){
+        perror("SIGSTOP failed");
+    }
+    
     logevt("PREEMPT  ←", idx);
 }
 
@@ -47,7 +118,7 @@ static void try_start_io(){
     shm->device_busy=1;
     // pede ao InterController agendar IRQ1 para daqui a IO_TIME_S
     kill(shm->pid_inter, SIGUSR1);
-    logevt("I/O START ", idx);
+    log_io_cycle("INÍCIO", idx, shm->wait_q.size);
 }
 
 // ----------------- Handlers de “interrupção” -----------------
@@ -61,7 +132,7 @@ static void on_irq1(int s){ // Fim de I/O: libera 1 da wait_q → ready
     shm->device_busy=0; shm->device_curr=-1;
     if(idx>=0){
         shm->pcb[idx].st=ST_READY; q_push(&shm->ready_q, idx);
-        logevt("I/O DONE  ", idx);
+        log_io_cycle("FIM", idx, shm->wait_q.size);
     }
     try_start_io();       // se tem mais esperando, encadeia novo +3s
     if(running<0) dispatch_next();
@@ -69,32 +140,115 @@ static void on_irq1(int s){ // Fim de I/O: libera 1 da wait_q → ready
 
 // Pedido de I/O vindo do app (syscall fake)
 static void on_sysc(int s){
-    // Qual app pediu? (heurística: o que está RUNNING marca wants_io=1)
-    if(running<0) return;
-    int idx=running;
-    shm->pcb[idx].wants_io=0;
-    // Bloqueia em I/O
-    kill(shm->pcb[idx].pid, SIGSTOP);
-    shm->pcb[idx].st=ST_WAIT_IO;
-    q_push(&shm->wait_q, idx);
-    running=-1;
-    logevt("TRAP I/O  ", idx);
-    try_start_io();
-    dispatch_next();
-}
-
-// Um app terminou naturalmente (não usamos muito aqui, mas cobre caso)
-static void on_chld(int s){
-    int status; pid_t p=waitpid(-1,&status,WNOHANG);
-    if(p>0){
-        for(int i=0;i<shm->nprocs;i++){
-            if(shm->pcb[i].pid==p){
-                shm->pcb[i].st=ST_DONE; q_push(&shm->done_q,i);
-                if(running==i) running=-1;
-                logevt("EXIT     ", i);
+    // Procura qual app pediu I/O (verifica wants_io)
+    int idx = -1;
+    
+    // Primeiro verifica se é o running
+    if(running >= 0 && shm->pcb[running].wants_io){
+        idx = running;
+    } else {
+        // Se não for o running, procura nos prontos (race condition)
+        for(int i = 0; i < shm->nprocs; i++){
+            if(shm->pcb[i].wants_io && shm->pcb[i].st == ST_READY){
+                idx = i;
                 break;
             }
         }
+    }
+    
+    if(idx < 0) return; // ninguém pediu, ignora
+    
+    // Limpa flag
+    shm->pcb[idx].wants_io = 0;
+    
+    // Se estava rodando, para de rodar
+    if(idx == running){
+        running = -1;
+    } else {
+        // Se estava em ready_q, remove de lá
+        // (implementação simplificada: será tratado naturalmente)
+    }
+    
+    // Bloqueia em I/O
+    if(shm->pcb[idx].st == ST_RUNNING || shm->pcb[idx].st == ST_READY){
+        kill(shm->pcb[idx].pid, SIGSTOP);
+        shm->pcb[idx].st = ST_WAIT_IO;
+        q_push(&shm->wait_q, idx);
+        log_io_cycle("SOLICITA", idx, shm->wait_q.size);
+    }
+    
+    try_start_io();
+    
+    if(running < 0){
+        dispatch_next();
+    }
+}
+
+// Um app terminou naturalmente (não usamos muito aqui, mas cobre caso)
+// Melhorar handler SIGCHLD
+static void on_chld(int s){
+    int status;
+    pid_t p;
+    
+    // Processa TODOS os filhos que terminaram
+    while((p = waitpid(-1, &status, WNOHANG)) > 0){
+        for(int i=0; i<shm->nprocs; i++){
+            if(shm->pcb[i].pid == p){
+                // Remove de qualquer fila
+                if(running == i) running = -1;
+                
+                // Marca como terminado
+                shm->pcb[i].st = ST_DONE;
+                q_push(&shm->done_q, i);
+                
+                logevt("EXIT     ", i);
+                check_all_done();
+                
+                // Despacha outro se necessário
+                if(running < 0){
+                    dispatch_next();
+                }
+                break;
+            }
+        }
+    }
+}
+// Handler para término explícito de app
+static void on_exit(int s){
+    // Descobre qual app está terminando
+    // (heurística: quem está RUNNING ou procura por PC==maxPC)
+    int idx = -1;
+    
+    if(running >= 0 && shm->pcb[running].PC >= 12){
+        idx = running;
+    } else {
+        // Procura quem chegou em maxPC
+        for(int i = 0; i < shm->nprocs; i++){
+            if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
+                idx = i;
+                break;
+            }
+        }
+    }
+    
+    if(idx < 0) return;
+    
+    // Remove de execução
+    if(running == idx) running = -1;
+    
+    // Para o processo
+    kill(shm->pcb[idx].pid, SIGSTOP);
+    
+    // Marca como DONE
+    shm->pcb[idx].st = ST_DONE;
+    q_push(&shm->done_q, idx);
+    
+    logevt("EXIT     ", idx);
+    check_all_done();
+    
+    // Despacha próximo
+    if(running < 0){
+        dispatch_next();
     }
 }
 
@@ -110,17 +264,20 @@ int main(){
     signal(SIG_IRQ0, on_irq0);
     signal(SIG_IRQ1, on_irq1);
     signal(SIG_SYSC, on_sysc);
+    signal(SIG_EXIT, on_exit);  // ← NOVO handler
 
-    // Inicial: todos READY; escolhe um
     dispatch_next();
 
-    // Loop principal “autônomo” (slide: escalonador como processo)
     for(;;){
-        pause(); // desperta só por sinais (IRQ0/IRQ1/syscall/CHLD)
-        // encerra quando todos DONE?
-        if(shm->done_q.size==shm->nprocs) break;
+        pause();
+        if(shm->done_q.size==shm->nprocs) {
+            time_t t=time(NULL); struct tm* tm=localtime(&t);
+            char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+            fprintf(stderr,"[%s] KERNEL: Todos processos DONE, encerrando...\n", hhmmss);
+            break;
+        }
     }
-    // Para garantir morte dos filhos remanescentes
+    
     for(int i=0;i<shm->nprocs;i++) if(shm->pcb[i].st!=ST_DONE) kill(shm->pcb[i].pid,SIGKILL);
     return 0;
 }

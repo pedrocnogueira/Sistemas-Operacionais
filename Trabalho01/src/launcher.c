@@ -1,55 +1,158 @@
 #include "../include/common.h"
 
+// Variáveis globais para cleanup
+static Shared* shm = NULL;
+static int shmid = -1;
+static pid_t pid_kernel = -1;
+static pid_t pid_inter = -1;
+static pid_t pids_apps[MAX_A];
+static int num_apps = 0;
+
+// Handler para SIGINT (Ctrl+C)
+static void cleanup_handler(int sig){
+    fprintf(stderr, "\n[LAUNCHER] Recebido sinal de interrupção (Ctrl+C). Limpando...\n");
+    
+    // 1. Mata o kernel (ele vai matar os apps)
+    if(pid_kernel > 0){
+        fprintf(stderr, "[LAUNCHER] Terminando KernelSim (PID %d)...\n", pid_kernel);
+        kill(pid_kernel, SIGTERM);
+        waitpid(pid_kernel, NULL, 0);
+    }
+    
+    // 2. Mata o InterController
+    if(pid_inter > 0){
+        fprintf(stderr, "[LAUNCHER] Terminando InterController (PID %d)...\n", pid_inter);
+        kill(pid_inter, SIGTERM);
+        waitpid(pid_inter, NULL, 0);
+    }
+    
+    // 3. Mata apps remanescentes (caso kernel não tenha matado)
+    for(int i = 0; i < num_apps; i++){
+        if(pids_apps[i] > 0){
+            // Verifica se ainda está vivo
+            if(kill(pids_apps[i], 0) == 0){
+                fprintf(stderr, "[LAUNCHER] Terminando App A%d (PID %d)...\n", i+1, pids_apps[i]);
+                kill(pids_apps[i], SIGKILL);
+                waitpid(pids_apps[i], NULL, 0);
+            }
+        }
+    }
+    
+    // 4. Libera memória compartilhada
+    if(shm != NULL && shm != (void*)-1){
+        fprintf(stderr, "[LAUNCHER] Liberando memória compartilhada...\n");
+        shmdt(shm);
+    }
+    
+    if(shmid >= 0){
+        shmctl(shmid, IPC_RMID, 0);
+    }
+    
+    fprintf(stderr, "[LAUNCHER] Limpeza concluída. Encerrando.\n");
+    exit(0);
+}
+
 static int create_shm(size_t sz){
-    int shmid=shmget(IPC_PRIVATE, sz, SHM_PERMS);
-    if(shmid<0){ perror("shmget"); exit(1); }
-    return shmid;
+    int id = shmget(IPC_PRIVATE, sz, SHM_PERMS);
+    if(id < 0){ 
+        perror("shmget"); 
+        exit(1); 
+    }
+    return id;
 }
 
 int main(){
-    // 1) cria SHM e zera (slide Memória Compartilhada)
-    int shmid=create_shm(sizeof(Shared));
-    Shared* shm=(Shared*)shmat(shmid,NULL,0);
-    if(shm==(void*)-1){ perror("shmat"); exit(1); }
-    memset(shm,0,sizeof(*shm));
-    q_init(&shm->ready_q); q_init(&shm->wait_q); q_init(&shm->done_q);
+    // Instala handler de SIGINT ANTES de criar qualquer coisa
+    signal(SIGINT, cleanup_handler);
+    signal(SIGTERM, cleanup_handler); // também trata SIGTERM
+    
+    // 1) cria SHM e zera
+    shmid = create_shm(sizeof(Shared));
+    shm = (Shared*)shmat(shmid, NULL, 0);
+    if(shm == (void*)-1){ 
+        perror("shmat"); 
+        exit(1); 
+    }
+    
+    memset(shm, 0, sizeof(*shm));
+    q_init(&shm->ready_q); 
+    q_init(&shm->wait_q); 
+    q_init(&shm->done_q);
 
     shm->nprocs = USE_A;
-    for(int i=0;i<USE_A;i++){
-        shm->pcb[i]=(PCB){ .pid=0, .id=i+1, .PC=0, .st=ST_NEW, .wants_io=0 };
-        q_push(&shm->ready_q, i); // entram como READY
+    num_apps = USE_A;
+    
+    for(int i = 0; i < USE_A; i++){
+        shm->pcb[i] = (PCB){ .pid=0, .id=i+1, .PC=0, .st=ST_NEW, .wants_io=0 };
+        q_push(&shm->ready_q, i);
         shm->pcb[i].st = ST_READY;
+        pids_apps[i] = 0; // inicializa
     }
 
-    // 2) exporta shmid via variável de ambiente para filhos usarem shmat
-    char shmid_str[32]; snprintf(shmid_str,sizeof(shmid_str), "%d", shmid);
+    // 2) exporta shmid via variável de ambiente
+    char shmid_str[32]; 
+    snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
     setenv("SO_SHMID", shmid_str, 1);
 
     // 3) fork kernel
-    pid_t k=fork();
-    if(k==0){ execl("./kernelsim","kernelsim", NULL); perror("exec kernel"); exit(1); }
-    shm->pid_kernel=k;
+    pid_kernel = fork();
+    if(pid_kernel == 0){ 
+        execl("./kernelsim", "kernelsim", NULL); 
+        perror("exec kernel"); 
+        exit(1); 
+    }
+    shm->pid_kernel = pid_kernel;
 
     // 4) fork interctl
-    pid_t ic=fork();
-    if(ic==0){ execl("./interctl","interctl", NULL); perror("exec interctl"); exit(1); }
-    shm->pid_inter=ic;
+    pid_inter = fork();
+    if(pid_inter == 0){ 
+        execl("./interctl", "interctl", NULL); 
+        perror("exec interctl"); 
+        exit(1); 
+    }
+    shm->pid_inter = pid_inter;
 
     // 5) fork apps/netos
-    for(int i=0;i<USE_A;i++){
-        pid_t p=fork();
-        if(p==0){
-            char id[8]; snprintf(id,sizeof(id), "%d", i);
-            execl("./app","app", id, NULL);
-            perror("exec app"); exit(1);
+    for(int i = 0; i < USE_A; i++){
+        pid_t p = fork();
+        if(p == 0){
+            char id[8]; 
+            snprintf(id, sizeof(id), "%d", i);
+            execl("./app", "app", id, NULL);
+            perror("exec app"); 
+            exit(1);
         }
+        pids_apps[i] = p;
         shm->pcb[i].pid = p;
     }
 
-    // 6) espera kernel terminar tudo (ou Ctrl-C)
-    int status=0; waitpid(k,&status,0);
+    fprintf(stderr, "[LAUNCHER] Sistema iniciado. Pressione Ctrl+C para interromper.\n");
 
-    // 7) limpeza
-    shmdt(shm); shmctl(shmid, IPC_RMID, 0);
+    // 6) espera kernel terminar normalmente
+    int status = 0; 
+    waitpid(pid_kernel, &status, 0);
+    
+    fprintf(stderr, "[LAUNCHER] KernelSim terminou. Limpando processos restantes...\n");
+
+    // 7) limpeza normal (quando kernel termina por conta própria)
+    // Mata InterController
+    if(pid_inter > 0){
+        kill(pid_inter, SIGTERM);
+        waitpid(pid_inter, NULL, 0);
+    }
+    
+    // Mata apps remanescentes
+    for(int i = 0; i < USE_A; i++){
+        if(pids_apps[i] > 0 && kill(pids_apps[i], 0) == 0){
+            kill(pids_apps[i], SIGKILL);
+            waitpid(pids_apps[i], NULL, 0);
+        }
+    }
+    
+    // Libera SHM
+    shmdt(shm); 
+    shmctl(shmid, IPC_RMID, 0);
+    
+    fprintf(stderr, "[LAUNCHER] Sistema encerrado com sucesso.\n");
     return 0;
 }

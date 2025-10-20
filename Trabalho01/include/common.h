@@ -72,6 +72,7 @@ typedef struct {
 #define SIG_IRQ0  SIGALRM   // timer
 #define SIG_IRQ1  SIGUSR2   // fim de I/O
 #define SIG_SYSC  SIGUSR1   // pedido de I/O (syscall fake)
+#define SIG_EXIT  SIGTERM   // aviso de término
 
 // Helpers
 static inline const char* sstate(State s){
