@@ -2,6 +2,7 @@
 
 static Shared* shm=NULL;
 static int running = -1; // índice do A em execução, -1 se nenhum
+static int should_exit = 0; // flag para encerrar o kernel
 
 // Logging simples
 static void logevt(const char* what, int idx){
@@ -297,6 +298,14 @@ static void on_app_exit(int s){
     }
 }
 
+// Handler para SIGTERM (shutdown do launcher)
+static void on_shutdown(int s){
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] KERNEL: Recebido SIGTERM, encerrando...\n", hhmmss);
+    should_exit = 1;
+}
+
 int main(){
     // SHM
     int shmid=atoi(getenv("SO_SHMID"));
@@ -310,6 +319,7 @@ int main(){
     signal(SIG_IRQ1, on_irq1);
     signal(SIG_SYSC, on_sysc);
     signal(SIG_EXIT, on_app_exit);  // ← NOVO handler
+    signal(SIGTERM, on_shutdown);   // ← Handler para shutdown
 
     dispatch_next();
 
@@ -317,6 +327,14 @@ int main(){
     // Apenas responde a sinais e gerencia processos
     for(;;){
         pause();
+        
+        // Verifica se deve encerrar (SIGTERM do launcher)
+        if(should_exit) {
+            time_t t=time(NULL); struct tm* tm=localtime(&t);
+            char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+            fprintf(stderr,"[%s] KERNEL: Encerrando sistema...\n", hhmmss);
+            break;
+        }
         
         // Log de debug para verificar estado (apenas quando todos estão DONE)
         if(shm->done_q.size == shm->nprocs) {
@@ -326,6 +344,12 @@ int main(){
         }
     }
     
-    // Este ponto nunca deve ser alcançado
+    // Cleanup antes de sair
+    for(int i=0;i<shm->nprocs;i++) {
+        if(shm->pcb[i].st!=ST_DONE && shm->pcb[i].pid > 0) {
+            kill(shm->pcb[i].pid,SIGKILL);
+        }
+    }
+    
     return 0;
 }
