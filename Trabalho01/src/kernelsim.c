@@ -355,6 +355,10 @@ int main(){
     
     fprintf(stderr, "[KERNEL] Cleanup concluído. Encerrando processo kernel...\n");
     
-    // Força saída imediata
-    exit(0);
+    // Força saída imediata com flush
+    fflush(stderr);
+    fflush(stdout);
+    
+    // Tenta diferentes formas de sair
+    _exit(0);  // Saída imediata sem cleanup
 }
