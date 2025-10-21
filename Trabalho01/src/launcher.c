@@ -165,31 +165,51 @@ int main(int argc, char* argv[]){
 
     fprintf(stderr, "[LAUNCHER] Sistema iniciado. Pressione Ctrl+C para interromper.\n");
 
-    // 6) espera kernel terminar normalmente
-    int status = 0; 
-    waitpid(pid_kernel, &status, 0);
+    // 6) Monitora quando todos os processos terminam (função de qualidade de vida)
+    fprintf(stderr, "[LAUNCHER] Monitorando execução dos processos...\n");
     
-    fprintf(stderr, "[LAUNCHER] KernelSim terminou. Limpando processos restantes...\n");
-
-    // 7) limpeza normal (quando kernel termina por conta própria)
+    int all_done = 0;
+    while(!all_done) {
+        sleep(1); // Verifica a cada segundo
+        
+        // Conta quantos processos estão DONE
+        int done_count = 0;
+        for(int i = 0; i < num_tasks; i++) {
+            if(shm->pcb[i].st == ST_DONE) {
+                done_count++;
+            }
+        }
+        
+        // Se todos terminaram, encerra o sistema
+        if(done_count == num_tasks) {
+            all_done = 1;
+            time_t t = time(NULL); 
+            struct tm* tm = localtime(&t);
+            char hhmmss[16]; 
+            strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
+            fprintf(stderr, "[%s] [LAUNCHER] Todos os processos terminaram. Encerrando sistema...\n", hhmmss);
+        }
+    }
+    
+    // 7) Shutdown automático quando todos terminam
+    fprintf(stderr, "[LAUNCHER] Enviando SIGTERM para Kernel e InterController...\n");
+    
+    // Mata Kernel (que agora funciona eternamente)
+    if(pid_kernel > 0){
+        kill(pid_kernel, SIGTERM);
+        waitpid(pid_kernel, NULL, 0);
+    }
+    
     // Mata InterController
     if(pid_inter > 0){
         kill(pid_inter, SIGTERM);
         waitpid(pid_inter, NULL, 0);
     }
     
-    // Mata apps remanescentes
-    for(int i = 0; i < num_apps; i++){
-        if(pids_apps[i] > 0 && kill(pids_apps[i], 0) == 0){
-            kill(pids_apps[i], SIGKILL);
-            waitpid(pids_apps[i], NULL, 0);
-        }
-    }
-    
     // Libera SHM
     shmdt(shm); 
     shmctl(shmid, IPC_RMID, 0);
     
-    fprintf(stderr, "[LAUNCHER] Sistema encerrado com sucesso.\n");
+    fprintf(stderr, "[LAUNCHER] Sistema encerrado automaticamente após conclusão de todos os processos.\n");
     return 0;
 }

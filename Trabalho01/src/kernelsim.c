@@ -34,8 +34,14 @@ static void log_all_done(){
 
 // Verifica se todos os processos estão em DONE
 static void check_all_done(){
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] DEBUG: check_all_done - Done: %d/%d\n", hhmmss, shm->done_q.size, shm->nprocs);
+    
     if(shm->done_q.size == shm->nprocs){
         log_all_done();
+        // KERNEL: Não encerra mais, apenas loga que todos estão DONE
+        // O launcher será responsável por encerrar o sistema
     }
 }
 
@@ -196,12 +202,29 @@ static void on_chld(int s){
     int status;
     pid_t p;
     
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] DEBUG: SIGCHLD recebido\n", hhmmss);
+    
     // Processa TODOS os filhos que terminaram
     while((p = waitpid(-1, &status, WNOHANG)) > 0){
         for(int i=0; i<shm->nprocs; i++){
             if(shm->pcb[i].pid == p){
+                fprintf(stderr,"[%s] DEBUG: Processo A%d (PID=%d) terminou via SIGCHLD\n", hhmmss, shm->pcb[i].id, p);
+                
                 // Remove de qualquer fila
                 if(running == i) running = -1;
+                
+                // Se está em I/O, remove da fila de I/O
+                if(shm->pcb[i].st == ST_WAIT_IO){
+                    remove_from_queue(&shm->wait_q, i);
+                    
+                    // Se era o processo atual em I/O, libera o dispositivo
+                    if(shm->device_curr == i){
+                        shm->device_busy = 0;
+                        shm->device_curr = -1;
+                    }
+                }
                 
                 // Marca como terminado
                 shm->pcb[i].st = ST_DONE;
@@ -221,23 +244,27 @@ static void on_chld(int s){
 }
 // Handler para término explícito de app
 static void on_app_exit(int s){
+    // Log de debug
+    time_t t=time(NULL); struct tm* tm=localtime(&t);
+    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+    fprintf(stderr,"[%s] DEBUG: on_app_exit chamado, running=%d\n", hhmmss, running);
+    
     // Descobre qual app está terminando
-    // (heurística: quem está RUNNING ou procura por PC==maxPC)
+    // Procura por qualquer processo que não esteja DONE e tenha PC >= 12
     int idx = -1;
     
-    if(running >= 0 && shm->pcb[running].PC >= 12){
-        idx = running;
-    } else {
-        // Procura quem chegou em maxPC
-        for(int i = 0; i < shm->nprocs; i++){
-            if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
-                idx = i;
-                break;
-            }
+    for(int i = 0; i < shm->nprocs; i++){
+        if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
+            idx = i;
+            fprintf(stderr,"[%s] DEBUG: Processo A%d (PC=%d, st=%s) terminando\n", hhmmss, shm->pcb[idx].id, shm->pcb[idx].PC, sstate(shm->pcb[idx].st));
+            break;
         }
     }
     
-    if(idx < 0) return;
+    if(idx < 0) {
+        fprintf(stderr,"[%s] DEBUG: Nenhum processo encontrado para terminar\n", hhmmss);
+        return;
+    }
     
     // Remove de execução
     if(running == idx) running = -1;
@@ -265,6 +292,7 @@ static void on_app_exit(int s){
     
     // Despacha próximo
     if(running < 0){
+        fprintf(stderr,"[%s] DEBUG: Despachando próximo após EXIT\n", hhmmss);
         dispatch_next();
     }
 }
@@ -285,16 +313,19 @@ int main(){
 
     dispatch_next();
 
+    // KERNEL: Funciona eternamente como em uma máquina real
+    // Apenas responde a sinais e gerencia processos
     for(;;){
         pause();
-        if(shm->done_q.size==shm->nprocs) {
+        
+        // Log de debug para verificar estado (apenas quando todos estão DONE)
+        if(shm->done_q.size == shm->nprocs) {
             time_t t=time(NULL); struct tm* tm=localtime(&t);
             char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-            fprintf(stderr,"[%s] KERNEL: Todos processos DONE, encerrando...\n", hhmmss);
-            break;
+            fprintf(stderr,"[%s] KERNEL: Todos processos DONE, aguardando novos processos...\n", hhmmss);
         }
     }
     
-    for(int i=0;i<shm->nprocs;i++) if(shm->pcb[i].st!=ST_DONE) kill(shm->pcb[i].pid,SIGKILL);
+    // Este ponto nunca deve ser alcançado
     return 0;
 }
