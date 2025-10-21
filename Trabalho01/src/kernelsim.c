@@ -39,6 +39,14 @@ static void check_all_done(){
         time_t t=time(NULL); struct tm* tm=localtime(&t);
         char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
         fprintf(stderr,"[%s] KERNEL: Todos processos DONE, encerrando...\n", hhmmss);
+        
+        // Ignora todos os sinais para evitar condições de corrida
+        signal(SIGCHLD, SIG_IGN);
+        signal(SIG_IRQ0, SIG_IGN);
+        signal(SIG_IRQ1, SIG_IGN);
+        signal(SIG_SYSC, SIG_IGN);
+        signal(SIG_EXIT, SIG_IGN);
+        
         exit(0);
     }
 }
@@ -129,6 +137,9 @@ static void preempt_running(){
         perror("SIGSTOP failed");
     }
     
+    // Aguarda um pouco para garantir que o processo parou
+    usleep(10000); // 10ms
+    
     logevt("PREEMPT  ←", idx);
 }
 
@@ -203,16 +214,10 @@ static void on_chld(int s){
     int status;
     pid_t p;
     
-    time_t t=time(NULL); struct tm* tm=localtime(&t);
-    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-    fprintf(stderr,"[%s] DEBUG: SIGCHLD recebido\n", hhmmss);
-    
     // Processa TODOS os filhos que terminaram
     while((p = waitpid(-1, &status, WNOHANG)) > 0){
         for(int i=0; i<shm->nprocs; i++){
             if(shm->pcb[i].pid == p){
-                fprintf(stderr,"[%s] DEBUG: Processo A%d (PID=%d) terminou via SIGCHLD\n", hhmmss, shm->pcb[i].id, p);
-                
                 // Remove de qualquer fila
                 if(running == i) running = -1;
                 
