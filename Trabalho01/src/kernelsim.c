@@ -45,7 +45,6 @@ static void check_all_done(){
         signal(SIG_IRQ0, SIG_IGN);
         signal(SIG_IRQ1, SIG_IGN);
         signal(SIG_SYSC, SIG_IGN);
-        signal(SIG_EXIT, SIG_IGN);
         
         exit(0);
     }
@@ -119,11 +118,12 @@ static void preempt_running(){
     
     // Verifica se processo ainda está vivo
     if(kill(shm->pcb[idx].pid, 0) < 0){
-        // Processo morreu
+        // Processo morreu - marca como DONE e remove de filas
         shm->pcb[idx].st = ST_DONE;
         q_push(&shm->done_q, idx);
         running = -1;
         logevt("DEAD     ", idx);
+        check_all_done();
         return;
     }
     
@@ -208,18 +208,30 @@ static void on_sysc(int s){
     }
 }
 
-// Um app terminou naturalmente (não usamos muito aqui, mas cobre caso)
-// Melhorar handler SIGCHLD
+// Flag para indicar que há filhos para reap
+static volatile sig_atomic_t children_to_reap = 0;
+
+// Handler SIGCHLD - apenas seta flag
 static void on_chld(int s){
+    children_to_reap = 1;
+}
+
+// Função para reapar filhos mortos
+static void reap_children(void){
     int status;
-    pid_t p;
+    pid_t pid;
     
-    // Processa TODOS os filhos que terminaram
-    while((p = waitpid(-1, &status, WNOHANG)) > 0){
+    while((pid = waitpid(-1, &status, WNOHANG)) > 0){
+        // Encontra o processo no PCB
         for(int i=0; i<shm->nprocs; i++){
-            if(shm->pcb[i].pid == p){
+            if(shm->pcb[i].pid == pid){
                 // Remove de qualquer fila
                 if(running == i) running = -1;
+                
+                // Remove da ready_q se estiver lá
+                if(shm->pcb[i].st == ST_READY){
+                    remove_from_queue(&shm->ready_q, i);
+                }
                 
                 // Se está em I/O, remove da fila de I/O
                 if(shm->pcb[i].st == ST_WAIT_IO){
@@ -236,7 +248,7 @@ static void on_chld(int s){
                 shm->pcb[i].st = ST_DONE;
                 q_push(&shm->done_q, i);
                 
-                logevt("EXIT     ", i);
+                logevt("DONE     ", i);
                 check_all_done();
                 
                 // Despacha outro se necessário
@@ -247,52 +259,7 @@ static void on_chld(int s){
             }
         }
     }
-}
-// Handler para término explícito de app
-static void on_app_exit(int s){
-    // Descobre qual app está terminando
-    // Procura por qualquer processo que não esteja DONE e tenha PC >= 12
-    int idx = -1;
-    
-    for(int i = 0; i < shm->nprocs; i++){
-        if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
-            idx = i;
-            break;
-        }
-    }
-    
-    if(idx < 0) {
-        return;
-    }
-    
-    // Remove de execução
-    if(running == idx) running = -1;
-    
-    // Se está em I/O, remove da fila de I/O
-    if(shm->pcb[idx].st == ST_WAIT_IO){
-        remove_from_queue(&shm->wait_q, idx);
-        
-        // Se era o processo atual em I/O, libera o dispositivo
-        if(shm->device_curr == idx){
-            shm->device_busy = 0;
-            shm->device_curr = -1;
-        }
-    }
-    
-    // Para o processo
-    kill(shm->pcb[idx].pid, SIGSTOP);
-    
-    // Marca como DONE
-    shm->pcb[idx].st = ST_DONE;
-    q_push(&shm->done_q, idx);
-    
-    logevt("EXIT     ", idx);
-    check_all_done();
-    
-    // Despacha próximo
-    if(running < 0){
-        dispatch_next();
-    }
+    children_to_reap = 0;
 }
 
 
@@ -309,13 +276,18 @@ int main(){
     signal(SIG_IRQ0, on_irq0);
     signal(SIG_IRQ1, on_irq1);
     signal(SIG_SYSC, on_sysc);
-    signal(SIG_EXIT, on_app_exit);  // ← NOVO handler
 
     dispatch_next();
 
     // Loop principal do kernel
     for(;;){
-        pause();
+        // Verifica se há filhos para reap
+        if(children_to_reap){
+            reap_children();
+        }
+        
+        // Pequena pausa para permitir processamento de sinais
+        usleep(1000); // 1ms
     }
     
     return 0;

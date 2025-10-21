@@ -63,16 +63,10 @@ int main(int argc, char** argv){
         }
     }
     
-    // Terminou: AVISA O KERNEL ANTES DE SAIR
+    // Terminou: simplesmente sai
     t=time(NULL); tm=localtime(&t);
     strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
     fprintf(stderr,"[%s] A%d TERMINANDO (PC=%d)\n", hhmmss, task_id, shm->pcb[idx].PC);
-    
-    // CRÍTICO: Sinaliza término ao kernel ANTES de exit
-    kill(shm->pid_kernel, SIG_EXIT);
-    
-    // Aguarda um pouco para garantir que kernel processou
-    usleep(100000); // 100ms
     
     exit(0);
 }
