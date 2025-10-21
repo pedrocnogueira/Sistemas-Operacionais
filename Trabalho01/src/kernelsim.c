@@ -220,7 +220,7 @@ static void on_chld(int s){
     }
 }
 // Handler para término explícito de app
-static void on_exit(int s){
+static void on_app_exit(int s){
     // Descobre qual app está terminando
     // (heurística: quem está RUNNING ou procura por PC==maxPC)
     int idx = -1;
@@ -281,7 +281,7 @@ int main(){
     signal(SIG_IRQ0, on_irq0);
     signal(SIG_IRQ1, on_irq1);
     signal(SIG_SYSC, on_sysc);
-    signal(SIG_EXIT, on_exit);  // ← NOVO handler
+    signal(SIG_EXIT, on_app_exit);  // ← NOVO handler
 
     dispatch_next();
 
