@@ -197,13 +197,51 @@ int main(int argc, char* argv[]){
     // Mata Kernel (que agora funciona eternamente)
     if(pid_kernel > 0){
         kill(pid_kernel, SIGTERM);
-        waitpid(pid_kernel, NULL, 0);
+        fprintf(stderr, "[LAUNCHER] Aguardando Kernel terminar...\n");
+        
+        // Aguarda até 5 segundos para o kernel terminar
+        int status;
+        pid_t result = waitpid(pid_kernel, &status, WNOHANG);
+        int timeout = 0;
+        
+        while(result == 0 && timeout < 50) { // 50 * 0.1s = 5s
+            usleep(100000); // 0.1 segundo
+            result = waitpid(pid_kernel, &status, WNOHANG);
+            timeout++;
+        }
+        
+        if(result == 0) {
+            fprintf(stderr, "[LAUNCHER] Timeout aguardando Kernel, forçando SIGKILL...\n");
+            kill(pid_kernel, SIGKILL);
+            waitpid(pid_kernel, NULL, 0);
+        } else {
+            fprintf(stderr, "[LAUNCHER] Kernel terminou normalmente.\n");
+        }
     }
     
     // Mata InterController
     if(pid_inter > 0){
         kill(pid_inter, SIGTERM);
-        waitpid(pid_inter, NULL, 0);
+        fprintf(stderr, "[LAUNCHER] Aguardando InterController terminar...\n");
+        
+        // Aguarda até 2 segundos para o intercontroller terminar
+        int status;
+        pid_t result = waitpid(pid_inter, &status, WNOHANG);
+        int timeout = 0;
+        
+        while(result == 0 && timeout < 20) { // 20 * 0.1s = 2s
+            usleep(100000); // 0.1 segundo
+            result = waitpid(pid_inter, &status, WNOHANG);
+            timeout++;
+        }
+        
+        if(result == 0) {
+            fprintf(stderr, "[LAUNCHER] Timeout aguardando InterController, forçando SIGKILL...\n");
+            kill(pid_inter, SIGKILL);
+            waitpid(pid_inter, NULL, 0);
+        } else {
+            fprintf(stderr, "[LAUNCHER] InterController terminou normalmente.\n");
+        }
     }
     
     // Libera SHM
