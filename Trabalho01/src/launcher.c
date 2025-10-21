@@ -61,7 +61,43 @@ static int create_shm(size_t sz){
     return id;
 }
 
-int main(){
+// Função para mostrar uso
+static void show_usage(const char* progname) {
+    fprintf(stderr, "Uso: %s [--test1|--test2|--test3]\n", progname);
+    fprintf(stderr, "  --test1: Executa apenas A1, A2, A3 (sem I/O)\n");
+    fprintf(stderr, "  --test2: Executa apenas A4, A5, A6 (com I/O)\n");
+    fprintf(stderr, "  --test3: Executa todas as 6 tarefas (A1-A6)\n");
+    fprintf(stderr, "  Sem parâmetros: Executa teste padrão (A1, A2, A3)\n");
+}
+
+int main(int argc, char* argv[]){
+    // Parse dos argumentos
+    int test_mode = 1; // padrão: teste 1
+    int num_tasks = TASKS_WITHOUT_IO;
+    int start_id = 1; // A1
+    
+    if (argc > 1) {
+        if (strcmp(argv[1], "--test1") == 0) {
+            test_mode = 1;
+            num_tasks = TASKS_WITHOUT_IO;
+            start_id = 1; // A1, A2, A3
+        } else if (strcmp(argv[1], "--test2") == 0) {
+            test_mode = 2;
+            num_tasks = TASKS_WITH_IO;
+            start_id = 4; // A4, A5, A6
+        } else if (strcmp(argv[1], "--test3") == 0) {
+            test_mode = 3;
+            num_tasks = MAX_A; // A1, A2, A3, A4, A5, A6
+            start_id = 1;
+        } else {
+            show_usage(argv[0]);
+            exit(1);
+        }
+    }
+    
+    fprintf(stderr, "[LAUNCHER] Iniciando Teste %d com %d tarefas (A%d-A%d)\n", 
+            test_mode, num_tasks, start_id, start_id + num_tasks - 1);
+
     // Instala handler de SIGINT ANTES de criar qualquer coisa
     signal(SIGINT, cleanup_handler);
     signal(SIGTERM, cleanup_handler); // também trata SIGTERM
@@ -79,11 +115,12 @@ int main(){
     q_init(&shm->wait_q); 
     q_init(&shm->done_q);
 
-    shm->nprocs = USE_A;
-    num_apps = USE_A;
+    shm->nprocs = num_tasks;
+    num_apps = num_tasks;
     
-    for(int i = 0; i < USE_A; i++){
-        shm->pcb[i] = (PCB){ .pid=0, .id=i+1, .PC=0, .st=ST_NEW, .wants_io=0 };
+    for(int i = 0; i < num_tasks; i++){
+        int task_id = start_id + i; // ID real da tarefa (1-6)
+        shm->pcb[i] = (PCB){ .pid=0, .id=task_id, .PC=0, .st=ST_NEW, .wants_io=0 };
         q_push(&shm->ready_q, i);
         shm->pcb[i].st = ST_READY;
         pids_apps[i] = 0; // inicializa
@@ -113,11 +150,11 @@ int main(){
     shm->pid_inter = pid_inter;
 
     // 5) fork apps/netos
-    for(int i = 0; i < USE_A; i++){
+    for(int i = 0; i < num_tasks; i++){
         pid_t p = fork();
         if(p == 0){
             char id[8]; 
-            snprintf(id, sizeof(id), "%d", i);
+            snprintf(id, sizeof(id), "%d", i); // índice na tabela PCB (0-5)
             execl("./app", "app", id, NULL);
             perror("exec app"); 
             exit(1);
@@ -142,7 +179,7 @@ int main(){
     }
     
     // Mata apps remanescentes
-    for(int i = 0; i < USE_A; i++){
+    for(int i = 0; i < num_apps; i++){
         if(pids_apps[i] > 0 && kill(pids_apps[i], 0) == 0){
             kill(pids_apps[i], SIGKILL);
             waitpid(pids_apps[i], NULL, 0);

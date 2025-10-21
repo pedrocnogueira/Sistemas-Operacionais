@@ -39,6 +39,23 @@ static void check_all_done(){
     }
 }
 
+// Remove um processo de uma fila (ready_q ou wait_q)
+static void remove_from_queue(Queue* q, int idx){
+    for(int j = 0; j < q->size; j++){
+        int pos = (q->head + j) % MAX_A;
+        if(q->q[pos] == idx){
+            // Move todos os elementos uma posição para frente
+            for(int k = j; k < q->size - 1; k++){
+                int curr = (q->head + k) % MAX_A;
+                int next = (q->head + k + 1) % MAX_A;
+                q->q[curr] = q->q[next];
+            }
+            q->size--;
+            break;
+        }
+    }
+}
+
 // Despacha próximo da ready_q
 static void dispatch_next(){
     if(running>=0) return;
@@ -140,41 +157,30 @@ static void on_irq1(int s){ // Fim de I/O: libera 1 da wait_q → ready
 
 // Pedido de I/O vindo do app (syscall fake)
 static void on_sysc(int s){
-    // Procura qual app pediu I/O (verifica wants_io)
-    int idx = -1;
-    
-    // Primeiro verifica se é o running
-    if(running >= 0 && shm->pcb[running].wants_io){
-        idx = running;
-    } else {
-        // Se não for o running, procura nos prontos (race condition)
-        for(int i = 0; i < shm->nprocs; i++){
-            if(shm->pcb[i].wants_io && shm->pcb[i].st == ST_READY){
-                idx = i;
-                break;
+    // Processa TODOS os processos que pediram I/O
+    for(int i = 0; i < shm->nprocs; i++){
+        if(shm->pcb[i].wants_io && (shm->pcb[i].st == ST_RUNNING || shm->pcb[i].st == ST_READY)){
+            int idx = i;
+            
+            // Limpa flag
+            shm->pcb[idx].wants_io = 0;
+            
+            // Se estava rodando, para de rodar
+            if(idx == running){
+                running = -1;
             }
+            
+            // Remove da ready_q se estiver lá
+            if(shm->pcb[idx].st == ST_READY){
+                remove_from_queue(&shm->ready_q, idx);
+            }
+            
+            // Bloqueia em I/O
+            kill(shm->pcb[idx].pid, SIGSTOP);
+            shm->pcb[idx].st = ST_WAIT_IO;
+            q_push(&shm->wait_q, idx);
+            log_io_cycle("SOLICITA", idx, shm->wait_q.size);
         }
-    }
-    
-    if(idx < 0) return; // ninguém pediu, ignora
-    
-    // Limpa flag
-    shm->pcb[idx].wants_io = 0;
-    
-    // Se estava rodando, para de rodar
-    if(idx == running){
-        running = -1;
-    } else {
-        // Se estava em ready_q, remove de lá
-        // (implementação simplificada: será tratado naturalmente)
-    }
-    
-    // Bloqueia em I/O
-    if(shm->pcb[idx].st == ST_RUNNING || shm->pcb[idx].st == ST_READY){
-        kill(shm->pcb[idx].pid, SIGSTOP);
-        shm->pcb[idx].st = ST_WAIT_IO;
-        q_push(&shm->wait_q, idx);
-        log_io_cycle("SOLICITA", idx, shm->wait_q.size);
     }
     
     try_start_io();
@@ -235,6 +241,17 @@ static void on_exit(int s){
     
     // Remove de execução
     if(running == idx) running = -1;
+    
+    // Se está em I/O, remove da fila de I/O
+    if(shm->pcb[idx].st == ST_WAIT_IO){
+        remove_from_queue(&shm->wait_q, idx);
+        
+        // Se era o processo atual em I/O, libera o dispositivo
+        if(shm->device_curr == idx){
+            shm->device_busy = 0;
+            shm->device_curr = -1;
+        }
+    }
     
     // Para o processo
     kill(shm->pcb[idx].pid, SIGSTOP);

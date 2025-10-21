@@ -13,11 +13,20 @@ Trabalho01/
 ├── Makefile
 ├── include/
 │   └── common.h
-└── src/
-    ├── launcher.c
-    ├── kernelsim.c
-    ├── interctl.c
-    └── app.c
+├── src/
+│   ├── launcher.c
+│   ├── kernelsim.c
+│   ├── interctl.c
+│   └── app.c
+├── bin/                    # Binários compilados (criado pelo make)
+│   ├── launcher
+│   ├── kernelsim
+│   ├── interctl
+│   └── app
+└── output/                 # Arquivos de saída dos testes (criado pelo make)
+    ├── test1_output.txt
+    ├── test2_output.txt
+    └── test3_output.txt
 ```
 
 - **`include/common.h`**: Tipos, constantes, estruturas (PCB, filas) e definições de sinais usados por todos.
@@ -32,11 +41,58 @@ Trabalho01/
 
 ```bash
 # dentro de Trabalho01/
-make          # compila todos os binários
-./launcher    # executa o sistema (pai que lança kernel, inter e apps)
+make          # compila todos os binários na pasta bin/
+cd bin && ./launcher    # executa o sistema (pai que lança kernel, inter e apps)
 ```
 
-> **Dica:** Abra dois terminais. Em um, rode `./launcher`. No outro, use `htop`/`ps` pra observar os processos ou `strace -p <pid>` (opcional) para inspecionar sinais. Os logs do KernelSim aparecem no **stderr**, com timestamps.
+> **Dica:** Abra dois terminais. Em um, rode `cd bin && ./launcher`. No outro, use `htop`/`ps` pra observar os processos ou `strace -p <pid>` (opcional) para inspecionar sinais. Os logs do KernelSim aparecem no **stderr**, com timestamps.
+
+---
+
+## 2.1) Execução dos Testes
+
+O sistema agora suporta 3 tipos de teste conforme solicitado pelo professor:
+
+### **Teste 1: A1, A2, A3 (sem I/O)**
+```bash
+# Compilar e executar
+make clean && make
+make test1
+```
+
+### **Teste 2: A4, A5, A6 (com I/O)**
+```bash
+make test2
+```
+
+### **Teste 3: Todas as 6 tarefas (A1-A6)**
+```bash
+make test3
+```
+
+### **Executar todos os testes**
+```bash
+make test-all
+```
+
+### **Limpar arquivos de saída**
+```bash
+make clean-logs
+```
+
+### **Comandos diretos no terminal**
+```bash
+# Teste 1: Apenas tarefas sem I/O
+cd bin && ./launcher --test1 2>&1 | tee ../output/test1_output.txt
+
+# Teste 2: Apenas tarefas com I/O
+cd bin && ./launcher --test2 2>&1 | tee ../output/test2_output.txt
+
+# Teste 3: Todas as tarefas
+cd bin && ./launcher --test3 2>&1 | tee ../output/test3_output.txt
+```
+
+> **Nota:** Os comandos mostram a saída no terminal em tempo real E salvam nos arquivos `output/test1_output.txt`, `output/test2_output.txt` e `output/test3_output.txt` para análise da linha do tempo.
 
 ---
 
