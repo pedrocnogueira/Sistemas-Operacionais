@@ -180,14 +180,22 @@ int main(int argc, char* argv[]){
             }
         }
         
-        // Se todos terminaram, encerra o sistema
+        // Se todos terminaram, aguarda um pouco para o kernel processar
         if(done_count == num_tasks) {
             all_done = 1;
             time_t t = time(NULL); 
             struct tm* tm = localtime(&t);
             char hhmmss[16]; 
             strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
-            fprintf(stderr, "[%s] [LAUNCHER] Todos os processos terminaram. Encerrando sistema...\n", hhmmss);
+            fprintf(stderr, "[%s] [LAUNCHER] Todos os processos terminaram. Aguardando kernel processar...\n", hhmmss);
+            
+            // Aguarda 2 segundos para o kernel processar os últimos eventos
+            sleep(2);
+            
+            t = time(NULL); 
+            tm = localtime(&t);
+            strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
+            fprintf(stderr, "[%s] [LAUNCHER] Encerrando sistema...\n", hhmmss);
         }
     }
     
