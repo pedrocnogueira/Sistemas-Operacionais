@@ -143,9 +143,11 @@ static void try_start_io(){
     log_io_cycle("INÍCIO", idx, shm->wait_q.size);
 }
 
-// ----------------- Handlers de “interrupção” -----------------
+// ----------------- Handlers de "interrupção" -----------------
 static void on_irq0(int s){ // Timer: fim de quantum → preempção RR
     preempt_running();
+    // Aguarda um pouco para garantir que o processo foi preemptado
+    usleep(10000); // 10ms
     dispatch_next();
 }
 static void on_irq1(int s){ // Fim de I/O: libera 1 da wait_q → ready
@@ -253,6 +255,7 @@ static void on_app_exit(int s){
     int idx = -1;
     
     for(int i = 0; i < shm->nprocs; i++){
+        fprintf(stderr,"[%s] DEBUG: Verificando A%d: PC=%d, st=%s\n", hhmmss, shm->pcb[i].id, shm->pcb[i].PC, sstate(shm->pcb[i].st));
         if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
             idx = i;
             fprintf(stderr,"[%s] DEBUG: Processo A%d (PC=%d, st=%s) terminando\n", hhmmss, shm->pcb[idx].id, shm->pcb[idx].PC, sstate(shm->pcb[idx].st));

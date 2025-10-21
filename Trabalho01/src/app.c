@@ -31,8 +31,14 @@ int main(int argc, char** argv){
 
     // Loop principal
     while(shm->pcb[idx].PC < maxPC){
-        sleep(1);
+        // Aguarda ser despachado pelo kernel
+        raise(SIGSTOP);
+        
+        // Quando despachado, incrementa PC
         shm->pcb[idx].PC++;
+        
+        // Aguarda o quantum completo (1 segundo)
+        sleep(1);
 
         // Apenas A4, A5, A6 fazem I/O
         if(does_io && (shm->pcb[idx].PC == 3 || shm->pcb[idx].PC == 8)){
