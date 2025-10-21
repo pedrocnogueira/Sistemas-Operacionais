@@ -29,27 +29,28 @@ int main(int argc, char** argv){
     
     raise(SIGSTOP);
 
-    // Loop principal
+    // Loop principal - App apenas executa, não controla quantum
     while(shm->pcb[idx].PC < maxPC){
-        // Aguarda ser despachado pelo kernel
-        raise(SIGSTOP);
-        
-        // Quando despachado, incrementa PC
-        shm->pcb[idx].PC++;
-        
-        // Aguarda o quantum completo (1 segundo)
+        // Simula trabalho da aplicação
         sleep(1);
+        
+        // Incrementa PC (contador de iterações)
+        shm->pcb[idx].PC++;
 
-        // Apenas A4, A5, A6 fazem I/O
+        // Apenas A4, A5, A6 fazem syscall de I/O
         if(does_io && (shm->pcb[idx].PC == 3 || shm->pcb[idx].PC == 8)){
             time_t t=time(NULL); struct tm* tm=localtime(&t);
             char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
             fprintf(stderr,"[%s] A%d SOLICITA I/O (PC=%d)\n", hhmmss, task_id, shm->pcb[idx].PC);
             
+            // Faz syscall para o kernel
             shm->pcb[idx].wants_io = 1;
             kill(shm->pid_kernel, SIG_SYSC);
+            
+            // Aguarda kernel processar a syscall (bloqueia)
             raise(SIGSTOP);
             
+            // Quando retorna da syscall, I/O foi concluído
             t=time(NULL); tm=localtime(&t);
             strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
             fprintf(stderr,"[%s] A%d I/O CONCLUÍDO (PC=%d)\n", hhmmss, task_id, shm->pcb[idx].PC);

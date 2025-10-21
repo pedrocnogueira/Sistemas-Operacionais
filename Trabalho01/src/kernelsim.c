@@ -34,12 +34,11 @@ static void log_all_done(){
 
 // Verifica se todos os processos estão em DONE
 static void check_all_done(){
-    time_t t=time(NULL); struct tm* tm=localtime(&t);
-    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-    fprintf(stderr,"[%s] DEBUG: check_all_done - Done: %d/%d\n", hhmmss, shm->done_q.size, shm->nprocs);
-    
     if(shm->done_q.size == shm->nprocs){
         log_all_done();
+        time_t t=time(NULL); struct tm* tm=localtime(&t);
+        char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
+        fprintf(stderr,"[%s] KERNEL: Todos processos DONE, encerrando...\n", hhmmss);
         exit(0);
     }
 }
@@ -99,7 +98,6 @@ static void dispatch_next(){
 }
 
 // Para quem está rodando e empilha de volta nos prontos
-// Para quem está rodando e empilha de volta nos prontos
 static void preempt_running(){
     if(running<0) return;
     
@@ -121,10 +119,12 @@ static void preempt_running(){
         return;
     }
     
+    // Preempção: para o processo e coloca na fila ready
     running=-1;
     shm->pcb[idx].st = ST_READY;
     q_push(&shm->ready_q, idx);
     
+    // Envia SIGSTOP para parar o processo
     if(kill(shm->pcb[idx].pid, SIGSTOP) < 0){
         perror("SIGSTOP failed");
     }
@@ -145,9 +145,9 @@ static void try_start_io(){
 
 // ----------------- Handlers de "interrupção" -----------------
 static void on_irq0(int s){ // Timer: fim de quantum → preempção RR
+    // IRQ0 = fim do quantum, preempta processo atual
     preempt_running();
-    // Aguarda um pouco para garantir que o processo foi preemptado
-    usleep(10000); // 10ms
+    // Escolhe próximo processo da fila ready
     dispatch_next();
 }
 static void on_irq1(int s){ // Fim de I/O: libera 1 da wait_q → ready
@@ -245,26 +245,18 @@ static void on_chld(int s){
 }
 // Handler para término explícito de app
 static void on_app_exit(int s){
-    // Log de debug
-    time_t t=time(NULL); struct tm* tm=localtime(&t);
-    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-    fprintf(stderr,"[%s] DEBUG: on_app_exit chamado, running=%d\n", hhmmss, running);
-    
     // Descobre qual app está terminando
     // Procura por qualquer processo que não esteja DONE e tenha PC >= 12
     int idx = -1;
     
     for(int i = 0; i < shm->nprocs; i++){
-        fprintf(stderr,"[%s] DEBUG: Verificando A%d: PC=%d, st=%s\n", hhmmss, shm->pcb[i].id, shm->pcb[i].PC, sstate(shm->pcb[i].st));
         if(shm->pcb[i].PC >= 12 && shm->pcb[i].st != ST_DONE){
             idx = i;
-            fprintf(stderr,"[%s] DEBUG: Processo A%d (PC=%d, st=%s) terminando\n", hhmmss, shm->pcb[idx].id, shm->pcb[idx].PC, sstate(shm->pcb[idx].st));
             break;
         }
     }
     
     if(idx < 0) {
-        fprintf(stderr,"[%s] DEBUG: Nenhum processo encontrado para terminar\n", hhmmss);
         return;
     }
     
@@ -294,7 +286,6 @@ static void on_app_exit(int s){
     
     // Despacha próximo
     if(running < 0){
-        fprintf(stderr,"[%s] DEBUG: Despachando próximo após EXIT\n", hhmmss);
         dispatch_next();
     }
 }
