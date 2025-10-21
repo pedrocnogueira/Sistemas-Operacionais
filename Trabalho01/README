@@ -9,15 +9,24 @@ Este documento explica **como o projeto está organizado**, **o que cada arquivo
 ## 1) Estrutura de pastas
 
 ```
-so-trab1/
+Trabalho01/
 ├── Makefile
 ├── include/
 │   └── common.h
-└── src/
-    ├── launcher.c
-    ├── kernelsim.c
-    ├── interctl.c
-    └── app.c
+├── src/
+│   ├── launcher.c
+│   ├── kernelsim.c
+│   ├── interctl.c
+│   └── app.c
+├── bin/                    # Binários compilados (criado pelo make)
+│   ├── launcher
+│   ├── kernelsim
+│   ├── interctl
+│   └── app
+└── output/                 # Arquivos de saída dos testes (criado pelo make)
+    ├── test1_output.txt
+    ├── test2_output.txt
+    └── test3_output.txt
 ```
 
 - **`include/common.h`**: Tipos, constantes, estruturas (PCB, filas) e definições de sinais usados por todos.
@@ -31,12 +40,59 @@ so-trab1/
 ## 2) Como compilar e executar
 
 ```bash
-# dentro de so-trab1/
-make          # compila todos os binários
-./launcher    # executa o sistema (pai que lança kernel, inter e apps)
+# dentro de Trabalho01/
+make          # compila todos os binários na pasta bin/
+cd bin && ./launcher    # executa o sistema (pai que lança kernel, inter e apps)
 ```
 
-> **Dica:** Abra dois terminais. Em um, rode `./launcher`. No outro, use `htop`/`ps` pra observar os processos ou `strace -p <pid>` (opcional) para inspecionar sinais. Os logs do KernelSim aparecem no **stderr**, com timestamps.
+> **Dica:** Abra dois terminais. Em um, rode `cd bin && ./launcher`. No outro, use `htop`/`ps` pra observar os processos ou `strace -p <pid>` (opcional) para inspecionar sinais. Os logs do KernelSim aparecem no **stderr**, com timestamps.
+
+---
+
+## 2.1) Execução dos Testes
+
+O sistema agora suporta 3 tipos de teste conforme solicitado pelo professor:
+
+### **Teste 1: A1, A2, A3 (sem I/O)**
+```bash
+# Compilar e executar
+make clean && make
+make test1
+```
+
+### **Teste 2: A4, A5, A6 (com I/O)**
+```bash
+make test2
+```
+
+### **Teste 3: Todas as 6 tarefas (A1-A6)**
+```bash
+make test3
+```
+
+### **Executar todos os testes**
+```bash
+make test-all
+```
+
+### **Limpar arquivos de saída**
+```bash
+make clean-logs
+```
+
+### **Comandos diretos no terminal**
+```bash
+# Teste 1: Apenas tarefas sem I/O
+cd bin && ./launcher --test1 2>&1 | tee ../output/test1_output.txt
+
+# Teste 2: Apenas tarefas com I/O
+cd bin && ./launcher --test2 2>&1 | tee ../output/test2_output.txt
+
+# Teste 3: Todas as tarefas
+cd bin && ./launcher --test3 2>&1 | tee ../output/test3_output.txt
+```
+
+> **Nota:** Os comandos mostram a saída no terminal em tempo real E salvam nos arquivos `output/test1_output.txt`, `output/test2_output.txt` e `output/test3_output.txt` para análise da linha do tempo.
 
 ---
 
@@ -95,7 +151,7 @@ t=05s: IRQ1     → I/O DONE(A2) → READY; (se ninguém RUNNING) DISPATCH → A
 
 ### 4.1 `include/common.h`
 - **Constantes**: `MAX_A`, `QUANTUM_S` (1s), `IO_TIME_S` (3s).
-- **Sinais mapeados**: `SIG_IRQ0 = SIGALRM`, `SIG_IRQ1 = SIGUSR2`, `SIG_SYSC = SIGUSR1`.
+- **Sinais mapeados**: `SIG_IRQ0 = SIGALRM`, `SIG_IRQ1 = SIGUSR2`, `SIG_SYSC = SIGUSR1`, `SIG_EXIT = SIGTERM`.
 - **Tipos**: `State`, `PCB`, `Queue`, `Shared`.
 - **Memória compartilhada (`Shared`)**: contém **tudo** que Kernel/Inter/Apps precisam (PCBs, filas, flags do dispositivo, PIDs dos serviços).
 
@@ -111,18 +167,23 @@ t=05s: IRQ1     → I/O DONE(A2) → READY; (se ninguém RUNNING) DISPATCH → A
   - `on_sysc` (syscall fake): move `RUNNING` para `WAIT_IO`, enfileira em `wait_q`, pede ao `interctl` para contar 3s (IRQ1) e despacha outro.
   - `on_irq1` (fim I/O): retira o **primeiro** de `wait_q` para `READY` e, se há mais esperando, **inicia** o I/O seguinte.
   - `on_chld`: se um app sair naturalmente, marca como `DONE` e evita zumbi.
-- **Dispatcher**: dá `SIGCONT` no escolhido e marca `RUNNING`.
-- **Preempção**: dá `SIGSTOP` no atual e o re-enfileira como `READY`.
+  - `on_exit`: trata término explícito de apps (quando PC atinge maxPC), marca como `DONE`.
+- **Dispatcher**: dá `SIGCONT` no escolhido e marca `RUNNING`. **Verifica se processo ainda está vivo** antes de despachar.
+- **Preempção**: dá `SIGSTOP` no atual e o re-enfileira como `READY`. **Verifica se processo ainda está vivo** antes de preemptar.
+- **Logging detalhado**: timestamps, logs de I/O específicos, verificação de todos DONE.
 - **Laço principal**: `pause()` e encerra quando todos estiverem `DONE`.
 
 ### 4.4 `src/interctl.c`
 - Instala handler de `SIGALRM` que **reagenda** `alarm(QUANTUM_S)` e envia `IRQ0` ao Kernel.
-- Ao receber `SIGUSR1` do Kernel (pedido de começar serviço de I/O), arma `alarm(IO_TIME_S)` e, ao disparar, envia `IRQ1` ao Kernel.
+- **Mecanismo de I/O otimizado**: usa contador `io_countdown` que decrementa a cada IRQ0 (1s) em vez de `alarm(IO_TIME_S)` separado.
+- Ao receber `SIGUSR1` do Kernel (pedido de começar serviço de I/O), inicia contagem de `IO_TIME_S` ticks.
+- Quando contador chega a zero, envia `IRQ1` ao Kernel (fim de I/O).
 
 ### 4.5 `src/app.c`
 - Ao iniciar, faz `raise(SIGSTOP)` para **começar parado** até o Kernel selecioná‑lo.
 - Laço principal: `sleep(1)`, `PC++`. Em `PC==3` e `PC==8`, **pede I/O** (sinaliza Kernel com `SIG_SYSC`).
-- Encerra quando `PC` atinge `maxPC` → Kernel registra como `DONE` via `SIGCHLD`/`waitpid`.
+- **Término coordenado**: quando `PC` atinge `maxPC`, sinaliza Kernel com `SIG_EXIT` antes de `exit()`.
+- Kernel registra como `DONE` via handler `on_exit` ou `SIGCHLD`/`waitpid`.
 
 ---
 
@@ -148,17 +209,45 @@ t=05s: IRQ1     → I/O DONE(A2) → READY; (se ninguém RUNNING) DISPATCH → A
 
 ---
 
-## 6) Depuração e problemas comuns
+## 6) Recursos de logging e robustez implementados
+
+### 6.1 Sistema de logging detalhado
+- **Timestamps**: todos os logs incluem timestamp no formato `[HH:MM:SS]`
+- **Eventos principais**: DISPATCH, PREEMPT, I/O SOLICITA, I/O INÍCIO, I/O FIM, EXIT
+- **Logs específicos de I/O**: mostram qual processo e tamanho da fila de espera
+- **Verificação de estado**: logs quando todos os processos chegam ao estado DONE
+
+### 6.2 Verificações de robustez
+- **Detecção de processos mortos**: kernel verifica se processos ainda estão vivos com `kill(pid, 0)` antes de despachar/preemptar
+- **Tratamento de processos mortos**: processos que morreram são automaticamente marcados como DONE
+- **Término coordenado**: apps sinalizam kernel com `SIG_EXIT` antes de sair
+- **Limpeza automática**: kernel mata processos restantes ao encerrar
+
+### 6.3 Exemplo de saída de logs
+```
+[14:30:15] DISPATCH → A1 (st=RUNNING, PC=0)
+[14:30:16] PREEMPT  ← A1 (st=READY, PC=1)
+[14:30:16] DISPATCH → A2 (st=RUNNING, PC=0)
+[14:30:18] I/O SOLICITA A2 | Fila I/O: 1 processos
+[14:30:18] I/O INÍCIO A2 | Fila I/O: 1 processos
+[14:30:21] I/O FIM A2 | Fila I/O: 0 processos
+[14:30:25] EXIT     A1 (st=DONE, PC=12)
+[14:30:25] TODOS DONE | Ready: 0, Wait: 0, Done: 3
+```
+
+---
+
+## 7) Depuração e problemas comuns
 
 - “Nada acontece / tudo parado” → verifique se `interctl` está rodando (IRQ0). Use `ps` e `kill -SIGALRM <pid interctl>` manualmente para testar.
-- “Processo não volta do I/O” → checar se `on_irq1` está ligado ao **sinal certo** (`SIGUSR2`) e se `interctl` dispara `alarm(IO_TIME_S)`.
+- "Processo não volta do I/O" → checar se `on_irq1` está ligado ao **sinal certo** (`SIGUSR2`) e se `interctl` está contando corretamente os ticks de I/O.
 - “Ninguém roda após preempção” → garantir que `ready_q` recebe de volta o antigo `RUNNING` e que `dispatch_next()` é chamado.
 - “Zumbis” → confirme o handler `SIGCHLD` e `waitpid(-1, &status, WNOHANG)`.
 - “SHM não fecha” → `shmctl(shmid, IPC_RMID, 0)` no `launcher` ao final.
 
 ---
 
-## 7) Como isso atende ao enunciado
+## 8) Como isso atende ao enunciado
 
 - **Fila de prontos / espera / terminados**: implementadas com `Queue` na **SHM** e manipuladas pelo **KernelSim**.
 - **Troca de contexto**: `SIGSTOP/SIGCONT` + atualização de estado/PC na **SHM**.
@@ -168,17 +257,19 @@ t=05s: IRQ1     → I/O DONE(A2) → READY; (se ninguém RUNNING) DISPATCH → A
 
 ---
 
-## 8) Checklist para entrega
+## 9) Checklist para entrega
 
 - [ ] `make` compila sem warnings (ou com o mínimo possível).
-- [ ] Execução mostra logs coerentes: **DISPATCH**, **PREEMPT**, **TRAP I/O**, **I/O START**, **I/O DONE**.
+- [ ] Execução mostra logs coerentes: **DISPATCH**, **PREEMPT**, **I/O SOLICITA**, **I/O INÍCIO**, **I/O FIM**, **EXIT**.
+- [ ] **Logging detalhado** com timestamps em formato `[HH:MM:SS]` para todos os eventos.
+- [ ] **Verificações de robustez**: processos mortos são detectados e marcados como DONE.
 - [ ] Todos os processos encerram; SHM é liberada.
 - [ ] README atualizado com **como rodar** e **mapa dos arquivos**.
 - [ ] (Opcional) **Relatório curto** com um diagrama de estados e uma linha do tempo real de execução.
 
 ---
 
-## 9) Diagrama simplificado (ASCII)
+## 10) Diagrama simplificado (ASCII)
 
 ```
            ┌─────────────┐       IRQ0 (1s)        ┌──────────────┐

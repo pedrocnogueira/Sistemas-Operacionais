@@ -13,9 +13,13 @@
 
 // ---------- Parâmetros de simulação ----------
 #define MAX_A      6        // até 6 apps/netos
-#define USE_A      3        // quantos lançar de fato
+#define USE_A      3        // quantos lançar de fato (será ajustado dinamicamente)
 #define QUANTUM_S  1        // IRQ0 a cada 1s (slide: timer) 
 #define IO_TIME_S  3        // IRQ1 = fim de I/O após 3s
+
+// ---------- Configurações de teste ----------
+#define TASKS_WITHOUT_IO  3    // A1, A2, A3 (sem I/O)
+#define TASKS_WITH_IO     3    // A4, A5, A6 (com I/O)
 
 // ---------- Estados ----------
 typedef enum { ST_NEW, ST_READY, ST_RUNNING, ST_WAIT_IO, ST_DONE } State;
@@ -72,6 +76,7 @@ typedef struct {
 #define SIG_IRQ0  SIGALRM   // timer
 #define SIG_IRQ1  SIGUSR2   // fim de I/O
 #define SIG_SYSC  SIGUSR1   // pedido de I/O (syscall fake)
+#define SIG_EXIT  SIGTERM   // aviso de término
 
 // Helpers
 static inline const char* sstate(State s){
