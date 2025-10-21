@@ -1,0 +1,8 @@
+# compilar o lab3 (processos)
+gcc -O2 lab3.c -o lab3
+
+# compilar o lab5 (threads)
+gcc -O2 -pthread lab5.c -o lab5
+
+gcc -O2 compare_labs.c -o compare_labs
+./compare_labs
