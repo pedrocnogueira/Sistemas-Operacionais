@@ -40,11 +40,8 @@ static void check_all_done(){
     
     if(shm->done_q.size == shm->nprocs){
         log_all_done();
-        fprintf(stderr,"[%s] KERNEL: Todos DONE - AUTO-SUICÍDIO em 3 segundos...\n", hhmmss);
-        fflush(stderr);
-        
-        // AUTO-SUICÍDIO: mata a si mesmo após 3 segundos
-        alarm(3);
+        // KERNEL: Não encerra mais, apenas loga que todos estão DONE
+        // O launcher será responsável por encerrar o sistema
     }
 }
 
@@ -311,16 +308,6 @@ static void on_shutdown(int s){
     _exit(0);
 }
 
-// Handler para SIGALRM (auto-suicídio)
-static void on_auto_suicide(int s){
-    time_t t=time(NULL); struct tm* tm=localtime(&t);
-    char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-    fprintf(stderr,"[%s] KERNEL: AUTO-SUICÍDIO executado!\n", hhmmss);
-    fflush(stderr);
-    
-    // SUICÍDIO IMEDIATO
-    _exit(0);
-}
 
 int main(){
     // SHM
@@ -336,7 +323,6 @@ int main(){
     signal(SIG_SYSC, on_sysc);
     signal(SIG_EXIT, on_app_exit);  // ← NOVO handler
     signal(SIGTERM, on_shutdown);   // ← Handler para shutdown
-    signal(SIGALRM, on_auto_suicide); // ← Handler para auto-suicídio
 
     dispatch_next();
 

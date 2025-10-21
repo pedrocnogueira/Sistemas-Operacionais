@@ -199,21 +199,21 @@ int main(int argc, char* argv[]){
         }
     }
     
-    // 7) Shutdown - aguarda kernel se matar sozinho
-    fprintf(stderr, "[LAUNCHER] Aguardando Kernel se matar sozinho...\n");
+    // 7) Shutdown - mata tudo e continua
+    fprintf(stderr, "[LAUNCHER] Encerrando sistema...\n");
     
-    // Aguarda kernel se matar (auto-suicídio)
+    // Mata Kernel
     if(pid_kernel > 0){
-        fprintf(stderr, "[LAUNCHER] Aguardando Kernel (PID %d) se matar...\n", pid_kernel);
-        waitpid(pid_kernel, NULL, 0);
-        fprintf(stderr, "[LAUNCHER] Kernel se matou sozinho!\n");
+        fprintf(stderr, "[LAUNCHER] Matando Kernel (PID %d)...\n", pid_kernel);
+        kill(pid_kernel, SIGKILL);
+        // NÃO AGUARDA - continua imediatamente
     }
     
     // Mata InterController
     if(pid_inter > 0){
         fprintf(stderr, "[LAUNCHER] Matando InterController (PID %d)...\n", pid_inter);
         kill(pid_inter, SIGKILL);
-        waitpid(pid_inter, NULL, 0);
+        // NÃO AGUARDA - continua imediatamente
     }
     
     // Libera SHM
