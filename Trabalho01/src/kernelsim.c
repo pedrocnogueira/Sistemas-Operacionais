@@ -2,7 +2,6 @@
 
 static Shared* shm=NULL;
 static int running = -1; // índice do A em execução, -1 se nenhum
-static volatile sig_atomic_t should_exit = 0; // flag para encerrar o kernel
 
 // Logging simples
 static void logevt(const char* what, int idx){
@@ -41,8 +40,7 @@ static void check_all_done(){
     
     if(shm->done_q.size == shm->nprocs){
         log_all_done();
-        // KERNEL: Não encerra mais, apenas loga que todos estão DONE
-        // O launcher será responsável por encerrar o sistema
+        exit(0);
     }
 }
 
@@ -298,11 +296,6 @@ static void on_app_exit(int s){
     }
 }
 
-// Handler para SIGTERM/SIGINT (shutdown do launcher)
-static void on_shutdown(int s){
-    // Apenas seta flag - async-signal-safe
-    should_exit = 1;
-}
 
 
 int main(){
@@ -318,39 +311,12 @@ int main(){
     signal(SIG_IRQ1, on_irq1);
     signal(SIG_SYSC, on_sysc);
     signal(SIG_EXIT, on_app_exit);  // ← NOVO handler
-    signal(SIGTERM, on_shutdown);   // ← Handler para shutdown
-    signal(SIGINT, on_shutdown);    // ← Handler para shutdown (Ctrl+C)
 
     dispatch_next();
 
-    // KERNEL: Funciona eternamente como em uma máquina real
-    // Apenas responde a sinais e gerencia processos
+    // Loop principal do kernel
     for(;;){
         pause();
-        
-        // Verifica se deve encerrar
-        if(should_exit) {
-            time_t t=time(NULL); struct tm* tm=localtime(&t);
-            char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-            fprintf(stderr,"[%s] KERNEL: Recebido sinal de shutdown, encerrando...\n", hhmmss);
-            
-            // Cleanup antes de sair
-            for(int i=0;i<shm->nprocs;i++) {
-                if(shm->pcb[i].st!=ST_DONE && shm->pcb[i].pid > 0) {
-                    kill(shm->pcb[i].pid,SIGKILL);
-                }
-            }
-            
-            fprintf(stderr,"[%s] KERNEL: Cleanup concluído, encerrando...\n", hhmmss);
-            break;
-        }
-        
-        // Log de debug para verificar estado (apenas quando todos estão DONE)
-        if(shm->done_q.size == shm->nprocs) {
-            time_t t=time(NULL); struct tm* tm=localtime(&t);
-            char hhmmss[16]; strftime(hhmmss,sizeof(hhmmss),"%H:%M:%S",tm);
-            fprintf(stderr,"[%s] KERNEL: Todos processos DONE, aguardando novos processos...\n", hhmmss);
-        }
     }
     
     return 0;

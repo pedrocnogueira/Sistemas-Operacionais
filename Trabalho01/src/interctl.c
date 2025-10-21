@@ -2,7 +2,6 @@
 
 static Shared* shm=NULL;
 static int io_countdown = 0;  // contador para I/O (0 = inativo)
-static volatile sig_atomic_t should_exit = 0; // flag para encerrar o intercontroller
 
 static void on_alarm(int s){
     // IRQ0: timer periódico a cada QUANTUM_S
@@ -30,11 +29,6 @@ static void on_start_io(int s){
     io_countdown = IO_TIME_S;  // 3 segundos = 3 ticks
 }
 
-// Handler para SIGTERM/SIGINT (shutdown do launcher)
-static void on_shutdown(int s){
-    // Apenas seta flag - async-signal-safe
-    should_exit = 1;
-}
 
 int main(){
     // anexa SHM
@@ -45,18 +39,9 @@ int main(){
     // Handlers
     signal(SIGUSR1, on_start_io);  // pedido para iniciar I/O
     signal(SIGALRM, on_alarm);     // timer unificado
-    signal(SIGTERM, on_shutdown);  // handler para shutdown
-    signal(SIGINT, on_shutdown);   // handler para shutdown (Ctrl+C)
 
     alarm(QUANTUM_S); // inicia IRQ0 periódico
 
-    // loop com verificação de shutdown
-    for(;;) {
-        pause();
-        
-        // Verifica se deve encerrar
-        if(should_exit) {
-            break;
-        }
-    }
+    // loop trivial
+    for(;;) pause();
 }

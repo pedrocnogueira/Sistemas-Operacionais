@@ -134,8 +134,6 @@ int main(int argc, char* argv[]){
     // 3) fork kernel
     pid_kernel = fork();
     if(pid_kernel == 0){ 
-        // Cria novo process group para kernel e intercontroller
-        setpgid(0, 0);
         execl("./kernelsim", "kernelsim", NULL); 
         perror("exec kernel"); 
         exit(1); 
@@ -145,8 +143,6 @@ int main(int argc, char* argv[]){
     // 4) fork interctl
     pid_inter = fork();
     if(pid_inter == 0){ 
-        // Adiciona ao mesmo process group do kernel
-        setpgid(0, pid_kernel);
         execl("./interctl", "interctl", NULL); 
         perror("exec interctl"); 
         exit(1); 
@@ -169,95 +165,24 @@ int main(int argc, char* argv[]){
 
     fprintf(stderr, "[LAUNCHER] Sistema iniciado. Pressione Ctrl+C para interromper.\n");
 
-    // 6) Monitora quando todos os processos terminam (função de qualidade de vida)
-    fprintf(stderr, "[LAUNCHER] Monitorando execução dos processos...\n");
+    // 6) Aguarda kernel terminar normalmente (como no código original)
+    int status = 0; 
+    waitpid(pid_kernel, &status, 0);
     
-    int all_done = 0;
-    while(!all_done) {
-        sleep(1); // Verifica a cada segundo
-        
-        // Conta quantos processos estão DONE
-        int done_count = 0;
-        for(int i = 0; i < num_tasks; i++) {
-            if(shm->pcb[i].st == ST_DONE) {
-                done_count++;
-            }
-        }
-        
-        // Se todos terminaram, aguarda um pouco para o kernel processar
-        if(done_count == num_tasks) {
-            all_done = 1;
-            time_t t = time(NULL); 
-            struct tm* tm = localtime(&t);
-            char hhmmss[16]; 
-            strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
-            fprintf(stderr, "[%s] [LAUNCHER] Todos os processos terminaram. Aguardando kernel processar...\n", hhmmss);
-            
-            // Aguarda 2 segundos para o kernel processar os últimos eventos
-            sleep(2);
-            
-            t = time(NULL); 
-            tm = localtime(&t);
-            strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
-            fprintf(stderr, "[%s] [LAUNCHER] Encerrando sistema...\n", hhmmss);
-        }
+    fprintf(stderr, "[LAUNCHER] KernelSim terminou. Limpando processos restantes...\n");
+
+    // 7) Limpeza normal (quando kernel termina por conta própria)
+    // Mata InterController
+    if(pid_inter > 0){
+        kill(pid_inter, SIGTERM);
+        waitpid(pid_inter, NULL, 0);
     }
     
-    // 7) Shutdown - envia SIGTERM para o process group
-    fprintf(stderr, "[LAUNCHER] Enviando SIGTERM para process group...\n");
-    
-    // Envia SIGTERM para o process group (kernel + intercontroller)
-    if(pid_kernel > 0){
-        killpg(pid_kernel, SIGTERM);
-    }
-    
-    // Aguarda todos os processos terminarem com timeout
-    fprintf(stderr, "[LAUNCHER] Aguardando processos terminarem...\n");
-    
-    pid_t pids_to_wait[] = {pid_kernel, pid_inter};
-    int num_pids = 2;
-    int timeout = 0;
-    const int max_timeout = 20; // 2 segundos (20 * 0.1s)
-    
-    while(timeout < max_timeout) {
-        int all_done = 1;
-        
-        for(int i = 0; i < num_pids; i++) {
-            if(pids_to_wait[i] > 0) {
-                int status;
-                pid_t result = waitpid(pids_to_wait[i], &status, WNOHANG);
-                if(result == 0) {
-                    // Processo ainda está vivo
-                    all_done = 0;
-                } else if(result > 0) {
-                    // Processo terminou
-                    fprintf(stderr, "[LAUNCHER] Processo PID %d terminou\n", pids_to_wait[i]);
-                    pids_to_wait[i] = 0; // marca como terminado
-                }
-            }
-        }
-        
-        if(all_done) {
-            fprintf(stderr, "[LAUNCHER] Todos os processos terminaram graciosamente\n");
-            break;
-        }
-        
-        usleep(100000); // 0.1 segundo
-        timeout++;
-    }
-    
-    // Se ainda há processos vivos, mata com SIGKILL
-    if(timeout >= max_timeout) {
-        fprintf(stderr, "[LAUNCHER] Timeout atingido, enviando SIGKILL...\n");
-        if(pid_kernel > 0){
-            killpg(pid_kernel, SIGKILL);
-        }
-        
-        // Aguarda mais um pouco para SIGKILL fazer efeito
-        for(int i = 0; i < num_pids; i++) {
-            if(pids_to_wait[i] > 0) {
-                waitpid(pids_to_wait[i], NULL, 0);
-            }
+    // Mata apps remanescentes
+    for(int i = 0; i < num_apps; i++){
+        if(pids_apps[i] > 0 && kill(pids_apps[i], 0) == 0){
+            kill(pids_apps[i], SIGKILL);
+            waitpid(pids_apps[i], NULL, 0);
         }
     }
     
