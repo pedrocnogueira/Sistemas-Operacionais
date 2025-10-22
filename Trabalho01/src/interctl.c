@@ -1,49 +1,49 @@
-#include "../include/common.h"
+#include "common.h"
 
-static Shared* shm=NULL;
-static int io_countdown = 0;  // contador para I/O (0 = inativo)
-static time_t io_start_time = 0;  // timestamp do início do I/O
+static Shared* shm = NULL;
+static int io_timer_active = 0; // 0 = quantum timer, 1 = I/O timer
+
+static void on_usr1(int s){
+    // I/O request recebido - inicia timer de I/O
+    io_timer_active = 1;
+    alarm(IO_TIME_S);
+}
 
 static void on_alarm(int s){
-    // IRQ0: timer periódico a cada QUANTUM_S
-    if(shm->pid_kernel>0) {
-        kill(shm->pid_kernel, SIG_IRQ0);
+
+    pid_t kpid = shm->pid_kernel;
+    if (kpid > 0) {
+        (void)kill(kpid, SIG_IRQ1);
+    }
+    io_timer_active = 0;
+}
+
+int main(int argc, char** argv){
+    if(argc < 2){
+        fprintf(stderr,"Uso: %s <shmid>\n", argv[0]);
+        exit(1);
     }
     
-    // Verifica se I/O deve terminar (baseado em tempo real)
-    if(io_countdown > 0){
-        time_t now = time(NULL);
-        if(now - io_start_time >= IO_TIME_S){
-            // I/O terminou! Envia IRQ1
-            io_countdown = 0;  // marca como inativo
-            if(shm->pid_kernel>0) {
-                kill(shm->pid_kernel, SIG_IRQ1);
-            }
+    // Conecta à memória compartilhada
+    int shmid = atoi(argv[1]);
+    shm = (Shared*)shmat(shmid, NULL, 0);
+    if(shm == (void*)-1){ 
+        perror("shmat interctl"); 
+        exit(1); 
+    }
+
+    // Configura handlers de sinais
+    signal(SIGUSR1, on_usr1);  // Pedido de I/O
+    signal(SIGALRM, on_alarm); // Timer de I/O
+
+    // Loop principal - apenas espera
+    for(;;){
+        sleep(1);
+        pid_t kpid = shm->pid_kernel;
+        if (kpid > 0) {
+            (void)kill(kpid, SIG_IRQ0);
         }
     }
     
-    alarm(QUANTUM_S); // reprograma IRQ0
-}
-
-static void on_start_io(int s){
-    // Kernel nos sinaliza para começar a contar IO_TIME_S segundos reais
-    io_countdown = 1;  // marca como ativo
-    io_start_time = time(NULL);  // registra timestamp do início
-}
-
-
-int main(){
-    // anexa SHM
-    int shmid=atoi(getenv("SO_SHMID"));
-    shm=(Shared*)shmat(shmid,NULL,0);
-    if(shm==(void*)-1){ perror("shmat interctl"); exit(1); }
-
-    // Handlers
-    signal(SIGUSR1, on_start_io);  // pedido para iniciar I/O
-    signal(SIGALRM, on_alarm);     // timer unificado
-
-    alarm(QUANTUM_S); // inicia IRQ0 periódico
-
-    // loop trivial
-    for(;;) pause();
+    return 0;
 }

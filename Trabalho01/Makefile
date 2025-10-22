@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -O2 -I./include
+CFLAGS=-Wall -O2
 
 BIN_DIR=bin
 OUTPUT_DIR=output
@@ -15,16 +15,16 @@ $(BIN_DIR):
 $(OUTPUT_DIR):
 	mkdir -p $(OUTPUT_DIR)
 
-$(BIN_DIR)/launcher: src/launcher.c include/common.h | $(BIN_DIR)
+$(BIN_DIR)/launcher: src/launcher.c src/common.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ src/launcher.c
 
-$(BIN_DIR)/kernelsim: src/kernelsim.c include/common.h | $(BIN_DIR)
+$(BIN_DIR)/kernelsim: src/kernelsim.c src/common.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ src/kernelsim.c
 
-$(BIN_DIR)/interctl: src/interctl.c include/common.h | $(BIN_DIR)
+$(BIN_DIR)/interctl: src/interctl.c src/common.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ src/interctl.c
 
-$(BIN_DIR)/app: src/app.c include/common.h | $(BIN_DIR)
+$(BIN_DIR)/app: src/app.c src/common.h | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ src/app.c
 
 clean:

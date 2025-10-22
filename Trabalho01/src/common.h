@@ -16,6 +16,7 @@
 #define USE_A      3        // quantos lançar de fato (será ajustado dinamicamente)
 #define QUANTUM_S  1        // IRQ0 a cada 1s (slide: timer) 
 #define IO_TIME_S  3        // IRQ1 = fim de I/O após 3s
+#define MAX_PC     12       // máximo de iterações por processo
 
 // ---------- Configurações de teste ----------
 #define TASKS_WITHOUT_IO  3    // A1, A2, A3 (sem I/O)
@@ -30,6 +31,8 @@ typedef struct {
     int   id;        // A1=1, A2=2...
     int   PC;        // “program counter” simulado
     State st;
+
+    int   io_profile; // 0: sem I/O, 1: com I/O
     int   wants_io;  // pedido de I/O pendente (syscall fake)
 } PCB;
 
