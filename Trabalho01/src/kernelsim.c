@@ -345,11 +345,16 @@ int main(){
     }
     
     // Cleanup antes de sair
+    fprintf(stderr, "[KERNEL] Iniciando cleanup...\n");
     for(int i=0;i<shm->nprocs;i++) {
         if(shm->pcb[i].st!=ST_DONE && shm->pcb[i].pid > 0) {
+            fprintf(stderr, "[KERNEL] Terminando processo A%d (PID %d)\n", shm->pcb[i].id, shm->pcb[i].pid);
             kill(shm->pcb[i].pid,SIGKILL);
         }
     }
     
-    return 0;
+    fprintf(stderr, "[KERNEL] Cleanup concluído. Encerrando processo kernel...\n");
+    
+    // Força saída imediata
+    exit(0);
 }
