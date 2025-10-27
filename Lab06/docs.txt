@@ -1,0 +1,8 @@
+# compilar
+gcc -O2 -pthread lab6.c -o lab6
+
+# 1) Rodar SEM sincronização (para ver erros de concorrência)
+./lab6
+
+# 2) Rodar COM semáforo (corrige as corridas)
+./lab6 --sync
