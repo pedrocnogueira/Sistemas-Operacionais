@@ -1,0 +1,39 @@
+Título
+
+Comunicação Síncrona entre Dois Processos usando Filas de Mensagens (System V)
+
+1️⃣ Objetivo
+
+Implementar a troca síncrona de mensagens entre dois processos — um produtor e um consumidor — de forma que o produtor só envie a próxima mensagem após receber confirmação do consumidor.
+
+2️⃣ Estrutura e funcionamento
+
+msgget() cria uma fila de mensagens.
+
+O processo principal cria um filho com fork().
+
+O pai (produtor) envia uma mensagem do tipo 1 e espera um ACK (mensagem do tipo 2).
+
+O filho (consumidor) recebe tipo 1, processa e devolve um ACK tipo 2.
+
+Esse ciclo se repete até o envio das 32 mensagens.
+
+3️⃣ Execução típica
+[PRODUTOR] Enviou 0
+[CONSUMIDOR] Recebeu 0
+[CONSUMIDOR] Enviou ACK para 0
+[PRODUTOR] Recebeu ACK do consumidor para 0
+...
+Fila removida. Execução concluída.
+
+4️⃣ Resultados observados
+
+A comunicação é estritamente ordenada: cada mensagem é confirmada antes da próxima ser enviada.
+
+Não há concorrência nem sobreposição de envio/recebimento.
+
+O controle de fluxo é garantido pelas operações msgrcv() e msgsnd() em pares alternados.
+
+5️⃣ Conclusão
+
+O programa demonstra a comunicação síncrona via filas System V, em que a troca de mensagens é controlada através de confirmações explícitas. O modelo garante a integridade e a ordem do fluxo, adequado para aplicações que exigem consistência total na entrega de dados.

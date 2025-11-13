@@ -1,0 +1,41 @@
+Título
+
+Comunicação assíncrona via fila de mensagens entre 3 processos
+
+1️⃣ Objetivo
+
+Implementar a troca de mensagens assíncrona entre um produtor e dois consumidores usando o mecanismo de filas POSIX (System V).
+
+2️⃣ Estrutura e lógica
+
+msgget() cria a fila.
+
+fork() gera dois processos consumidores.
+
+O produtor envia 256 mensagens inteiras, 1/s.
+
+Consumidor 1 lê 1/s, consumidor 2 lê 1/2 s.
+
+A fila permite até 64 mensagens; o kernel sincroniza automaticamente quando cheia.
+
+Após a produção e consumo total, o processo principal elimina a fila via msgctl(…, IPC_RMID, …).
+
+3️⃣ Execução típica (resumo)
+[PRODUTOR] Enviou 0
+[CONSUMIDOR 1] Recebeu 0
+[PRODUTOR] Enviou 1
+[CONSUMIDOR 2] Recebeu 1
+...
+Fila removida. Execução concluída.
+
+4️⃣ Resultados observados
+
+Comunicação ocorre sem bloqueio ativo entre processos.
+
+A latência depende apenas dos sleep() configurados.
+
+O kernel garante ordem FIFO e controle de saturação do buffer.
+
+5️⃣ Conclusão
+
+O experimento demonstra a comunicação assíncrona entre processos independentes via filas de mensagens System V, respeitando limites de buffer e cadência distinta de produtores e consumidores.
