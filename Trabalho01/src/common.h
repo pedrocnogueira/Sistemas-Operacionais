@@ -56,6 +56,7 @@ static inline int  q_pop(Queue* q){
 // ---------- Área de Memória Compartilhada ----------
 typedef struct {
     // PIDs de serviços
+    pid_t pid_launcher;
     pid_t pid_kernel;
     pid_t pid_inter;
 

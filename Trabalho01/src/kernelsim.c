@@ -68,14 +68,15 @@ static void check_all_done(void) {
     if (shm->done_q.size == shm->nprocs) {
         log_all_done();
         char hhmmss[16]; now_hhmmss(hhmmss);
-        fprintf(stderr, "[%s] KERNEL: Todos processos DONE, encerrando...\n", hhmmss);
+        fprintf(stderr, "[%s] KERNEL: Todos processos DONE\n", hhmmss);
 
         // Evita corridas enquanto encerramos
         signal(SIGCHLD, SIG_IGN);
         signal(SIG_IRQ0, SIG_IGN);
         signal(SIG_IRQ1, SIG_IGN);
         signal(SIG_SYSC, SIG_IGN);
-        _exit(0);
+
+        kill(shm->pid_launcher, SIGUSR1);
     }
 }
 

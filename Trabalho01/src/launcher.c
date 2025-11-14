@@ -1,5 +1,12 @@
 #include "common.h"
 
+static int should_exit = 0;
+
+static void on_usr1(int s) {
+    (void)s;
+    should_exit = 1;
+}
+
 int main(int argc, char** argv){
     if(argc<2){
         fprintf(stderr,"Uso: %s --test1|--test2|--test3\n",argv[0]);
@@ -19,6 +26,9 @@ int main(int argc, char** argv){
     q_init(&shm->wait_q);
     q_init(&shm->done_q);
     for (int i=0;i<MAX_A;i++) shm->pcb[i].id = -1;
+    shm->pid_launcher = getpid();
+
+    signal(SIGUSR1, on_usr1);
 
     // Define processos baseado no teste (compactos desde 0)
     if (strcmp(argv[1],"--test1") == 0){
@@ -71,9 +81,12 @@ int main(int argc, char** argv){
     shm->pid_kernel = pid_kernel;
 
     // Aguarda kernel terminar
-    int status;
-    waitpid(pid_kernel, &status, 0);
+    while(!should_exit) {
+        pause();
+    }
 
+    kill(pid_kernel, SIGTERM);
+    waitpid(pid_kernel, NULL, 0);
     printf("[LAUNCHER] Kernel finalizado. Encerrando sistema...\n");
 
     // Encerra o intercontroller e limpa SHM
