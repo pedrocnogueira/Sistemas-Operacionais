@@ -1,253 +1,104 @@
-#include "../include/common.h"
+#include "common.h"
 
-// Variáveis globais para cleanup
-static Shared* shm = NULL;
-static int shmid = -1;
-static pid_t pid_kernel = -1;
-static pid_t pid_inter = -1;
-static pid_t pids_apps[MAX_A];
-static int num_apps = 0;
+static int should_exit = 0;
 
-// Handler para SIGINT (Ctrl+C)
-static void cleanup_handler(int sig){
-    fprintf(stderr, "\n[LAUNCHER] Recebido sinal de interrupção (Ctrl+C). Limpando...\n");
-    
-    // 1. Mata o kernel (ele vai matar os apps)
-    if(pid_kernel > 0){
-        fprintf(stderr, "[LAUNCHER] Terminando KernelSim (PID %d)...\n", pid_kernel);
-        kill(pid_kernel, SIGTERM);
-        waitpid(pid_kernel, NULL, 0);
-    }
-    
-    // 2. Mata o InterController
-    if(pid_inter > 0){
-        fprintf(stderr, "[LAUNCHER] Terminando InterController (PID %d)...\n", pid_inter);
-        kill(pid_inter, SIGTERM);
-        waitpid(pid_inter, NULL, 0);
-    }
-    
-    // 3. Mata apps remanescentes (caso kernel não tenha matado)
-    for(int i = 0; i < num_apps; i++){
-        if(pids_apps[i] > 0){
-            // Verifica se ainda está vivo
-            if(kill(pids_apps[i], 0) == 0){
-                fprintf(stderr, "[LAUNCHER] Terminando App A%d (PID %d)...\n", i+1, pids_apps[i]);
-                kill(pids_apps[i], SIGKILL);
-                waitpid(pids_apps[i], NULL, 0);
-            }
-        }
-    }
-    
-    // 4. Libera memória compartilhada
-    if(shm != NULL && shm != (void*)-1){
-        fprintf(stderr, "[LAUNCHER] Liberando memória compartilhada...\n");
-        shmdt(shm);
-    }
-    
-    if(shmid >= 0){
-        shmctl(shmid, IPC_RMID, 0);
-    }
-    
-    fprintf(stderr, "[LAUNCHER] Limpeza concluída. Encerrando.\n");
-    exit(0);
+static void on_usr1(int s) {
+    (void)s;
+    should_exit = 1;
 }
 
-static int create_shm(size_t sz){
-    int id = shmget(IPC_PRIVATE, sz, SHM_PERMS);
-    if(id < 0){ 
-        perror("shmget"); 
-        exit(1); 
+int main(int argc, char** argv){
+    if(argc<2){
+        fprintf(stderr,"Uso: %s --test1|--test2|--test3\n",argv[0]);
+        exit(1);
     }
-    return id;
-}
 
-// Função para mostrar uso
-static void show_usage(const char* progname) {
-    fprintf(stderr, "Uso: %s [--test1|--test2|--test3]\n", progname);
-    fprintf(stderr, "  --test1: Executa apenas A1, A2, A3 (sem I/O)\n");
-    fprintf(stderr, "  --test2: Executa apenas A4, A5, A6 (com I/O)\n");
-    fprintf(stderr, "  --test3: Executa todas as 6 tarefas (A1-A6)\n");
-    fprintf(stderr, "  Sem parâmetros: Executa teste padrão (A1, A2, A3)\n");
-}
+    // Cria SHM
+    int shmid = shmget(IPC_PRIVATE, sizeof(Shared), IPC_CREAT|0600);
+    if (shmid < 0){ perror("shmget"); exit(1); }
 
-int main(int argc, char* argv[]){
-    // Parse dos argumentos
-    int test_mode = 1; // padrão: teste 1
-    int num_tasks = TASKS_WITHOUT_IO;
-    int start_id = 1; // A1
-    
-    if (argc > 1) {
-        if (strcmp(argv[1], "--test1") == 0) {
-            test_mode = 1;
-            num_tasks = TASKS_WITHOUT_IO;
-            start_id = 1; // A1, A2, A3
-        } else if (strcmp(argv[1], "--test2") == 0) {
-            test_mode = 2;
-            num_tasks = TASKS_WITH_IO;
-            start_id = 4; // A4, A5, A6
-        } else if (strcmp(argv[1], "--test3") == 0) {
-            test_mode = 3;
-            num_tasks = MAX_A; // A1, A2, A3, A4, A5, A6
-            start_id = 1;
-        } else {
-            show_usage(argv[0]);
-            exit(1);
-        }
-    }
-    
-    fprintf(stderr, "[LAUNCHER] Iniciando Teste %d com %d tarefas (A%d-A%d)\n", 
-            test_mode, num_tasks, start_id, start_id + num_tasks - 1);
+    Shared* shm = (Shared*)shmat(shmid, NULL, 0);
+    if (shm == (void*)-1){ perror("shmat"); exit(1); }
 
-    // Instala handler de SIGINT ANTES de criar qualquer coisa
-    signal(SIGINT, cleanup_handler);
-    signal(SIGTERM, cleanup_handler); // também trata SIGTERM
-    
-    // 1) cria SHM e zera
-    shmid = create_shm(sizeof(Shared));
-    shm = (Shared*)shmat(shmid, NULL, 0);
-    if(shm == (void*)-1){ 
-        perror("shmat"); 
-        exit(1); 
-    }
-    
-    memset(shm, 0, sizeof(*shm));
-    q_init(&shm->ready_q); 
-    q_init(&shm->wait_q); 
+    // Inicializa SHM
+    memset(shm, 0, sizeof(Shared));
+    q_init(&shm->ready_q);
+    q_init(&shm->wait_q);
     q_init(&shm->done_q);
+    for (int i=0;i<MAX_A;i++) shm->pcb[i].id = -1;
+    shm->pid_launcher = getpid();
 
-    shm->nprocs = num_tasks;
-    num_apps = num_tasks;
-    
-    for(int i = 0; i < num_tasks; i++){
-        int task_id = start_id + i; // ID real da tarefa (1-6)
-        shm->pcb[i] = (PCB){ .pid=0, .id=task_id, .PC=0, .st=ST_NEW, .wants_io=0 };
-        q_push(&shm->ready_q, i);
-        shm->pcb[i].st = ST_READY;
-        pids_apps[i] = 0; // inicializa
+    signal(SIGUSR1, on_usr1);
+
+    // Define processos baseado no teste (compactos desde 0)
+    if (strcmp(argv[1],"--test1") == 0){
+        shm->nprocs = 3;
+        for (int i=0;i<3;i++){
+            shm->pcb[i].id = i+1;
+            shm->pcb[i].st = ST_NEW;
+            shm->pcb[i].PC = 0;
+            shm->pcb[i].io_profile = 0; // sem I/O
+        }
+    } else if (strcmp(argv[1],"--test2") == 0){
+        shm->nprocs = 3;
+        for (int i=0;i<3;i++){
+            shm->pcb[i].id = i+1;
+            shm->pcb[i].st = ST_NEW;
+            shm->pcb[i].PC = 0;
+            shm->pcb[i].io_profile = 1; // com I/O (PC=3 e 8)
+        }
+    } else if (strcmp(argv[1],"--test3") == 0){
+        shm->nprocs = 6;
+        for (int i=0;i<6;i++){
+            shm->pcb[i].id = i+1;
+            shm->pcb[i].st = ST_NEW;
+            shm->pcb[i].PC = 0;
+            shm->pcb[i].io_profile = (i >= 3); // últimas 3 com I/O
+        }
+    } else {
+        fprintf(stderr, "Teste inválido: %s\n", argv[1]);
+        exit(1);
     }
 
-    // 2) exporta shmid via variável de ambiente
-    char shmid_str[32]; 
-    snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
-    setenv("SO_SHMID", shmid_str, 1);
-
-    // 3) fork kernel
-    pid_kernel = fork();
-    if(pid_kernel == 0){ 
-        execl("./kernelsim", "kernelsim", NULL); 
-        perror("exec kernel"); 
-        exit(1); 
-    }
-    shm->pid_kernel = pid_kernel;
-
-    // 4) fork interctl
-    pid_inter = fork();
-    if(pid_inter == 0){ 
-        execl("./interctl", "interctl", NULL); 
-        perror("exec interctl"); 
-        exit(1); 
+    // Cria InterController
+    pid_t pid_inter = fork();
+    if (pid_inter == 0){
+        char shmid_str[32];
+        snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
+        execl("./interctl","interctl", shmid_str, NULL);
+        perror("execl interctl"); exit(1);
     }
     shm->pid_inter = pid_inter;
 
-    // 5) fork apps/netos
-    for(int i = 0; i < num_tasks; i++){
-        pid_t p = fork();
-        if(p == 0){
-            char id[8]; 
-            snprintf(id, sizeof(id), "%d", i); // índice na tabela PCB (0-5)
-            execl("./app", "app", id, NULL);
-            perror("exec app"); 
-            exit(1);
-        }
-        pids_apps[i] = p;
-        shm->pcb[i].pid = p;
+    // Cria Kernel
+    pid_t pid_kernel = fork();
+    if (pid_kernel == 0){
+        char shmid_str[32];
+        snprintf(shmid_str, sizeof(shmid_str), "%d", shmid);
+        execl("./kernelsim","kernelsim", shmid_str, NULL);
+        perror("execl kernelsim"); exit(1);
+    }
+    shm->pid_kernel = pid_kernel;
+
+    // Aguarda kernel terminar
+    while(!should_exit) {
+        pause();
     }
 
-    fprintf(stderr, "[LAUNCHER] Sistema iniciado. Pressione Ctrl+C para interromper.\n");
+    kill(pid_kernel, SIGTERM);
+    waitpid(pid_kernel, NULL, 0);
+    printf("[LAUNCHER] Kernel finalizado. Encerrando sistema...\n");
 
-    // 6) Monitora quando todos os processos terminam (função de qualidade de vida)
-    fprintf(stderr, "[LAUNCHER] Monitorando execução dos processos...\n");
+    // Encerra o intercontroller e limpa SHM
+    kill(pid_inter, SIGTERM);
+    waitpid(pid_inter, NULL, 0);
+
+    printf("[LAUNCHER] InterController encerrado.\n");
+    printf("[LAUNCHER] Limpando memória compartilhada...\n");
+
+    shmdt(shm);
+    shmctl(shmid, IPC_RMID, NULL);
     
-    int all_done = 0;
-    while(!all_done) {
-        sleep(1); // Verifica a cada segundo
-        
-        // Conta quantos processos estão DONE
-        int done_count = 0;
-        for(int i = 0; i < num_tasks; i++) {
-            if(shm->pcb[i].st == ST_DONE) {
-                done_count++;
-            }
-        }
-        
-        // Se todos terminaram, encerra o sistema
-        if(done_count == num_tasks) {
-            all_done = 1;
-            time_t t = time(NULL); 
-            struct tm* tm = localtime(&t);
-            char hhmmss[16]; 
-            strftime(hhmmss, sizeof(hhmmss), "%H:%M:%S", tm);
-            fprintf(stderr, "[%s] [LAUNCHER] Todos os processos terminaram. Encerrando sistema...\n", hhmmss);
-        }
-    }
-    
-    // 7) Shutdown automático quando todos terminam
-    fprintf(stderr, "[LAUNCHER] Enviando SIGTERM para Kernel e InterController...\n");
-    
-    // Mata Kernel (que agora funciona eternamente)
-    if(pid_kernel > 0){
-        kill(pid_kernel, SIGTERM);
-        fprintf(stderr, "[LAUNCHER] Aguardando Kernel terminar...\n");
-        
-        // Aguarda até 5 segundos para o kernel terminar
-        int status;
-        pid_t result = waitpid(pid_kernel, &status, WNOHANG);
-        int timeout = 0;
-        
-        while(result == 0 && timeout < 50) { // 50 * 0.1s = 5s
-            usleep(100000); // 0.1 segundo
-            result = waitpid(pid_kernel, &status, WNOHANG);
-            timeout++;
-        }
-        
-        if(result == 0) {
-            fprintf(stderr, "[LAUNCHER] Timeout aguardando Kernel, forçando SIGKILL...\n");
-            kill(pid_kernel, SIGKILL);
-            waitpid(pid_kernel, NULL, 0);
-        } else {
-            fprintf(stderr, "[LAUNCHER] Kernel terminou normalmente.\n");
-        }
-    }
-    
-    // Mata InterController
-    if(pid_inter > 0){
-        kill(pid_inter, SIGTERM);
-        fprintf(stderr, "[LAUNCHER] Aguardando InterController terminar...\n");
-        
-        // Aguarda até 2 segundos para o intercontroller terminar
-        int status;
-        pid_t result = waitpid(pid_inter, &status, WNOHANG);
-        int timeout = 0;
-        
-        while(result == 0 && timeout < 20) { // 20 * 0.1s = 2s
-            usleep(100000); // 0.1 segundo
-            result = waitpid(pid_inter, &status, WNOHANG);
-            timeout++;
-        }
-        
-        if(result == 0) {
-            fprintf(stderr, "[LAUNCHER] Timeout aguardando InterController, forçando SIGKILL...\n");
-            kill(pid_inter, SIGKILL);
-            waitpid(pid_inter, NULL, 0);
-        } else {
-            fprintf(stderr, "[LAUNCHER] InterController terminou normalmente.\n");
-        }
-    }
-    
-    // Libera SHM
-    shmdt(shm); 
-    shmctl(shmid, IPC_RMID, 0);
-    
-    fprintf(stderr, "[LAUNCHER] Sistema encerrado automaticamente após conclusão de todos os processos.\n");
+    printf("[LAUNCHER] Sistema completamente encerrado.\n");
     return 0;
 }

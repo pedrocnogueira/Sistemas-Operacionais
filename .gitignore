@@ -55,3 +55,7 @@ dkms.conf
 *.dwo
 
 .DS_Store
+
+# Trabalho01 specific
+Trabalho01/bin/
+Trabalho01/output/
