@@ -51,27 +51,100 @@ clean:
 # Recompila tudo
 rebuild: clean all
 
-# Testes rápidos
+# Arquivos de entrada
+LOGS = compilador matriz compressor simulador
+
+# Testes rápidos (um arquivo, um algoritmo)
 test-lru:
-	./$(TARGET) LRU Entradas/compilador.log 8 2
+	./$(TARGET) LRU Entradas/compilador.log 82
 
 test-nru:
-	./$(TARGET) NRU Entradas/compilador.log 8 2
+	./$(TARGET) NRU Entradas/compilador.log 82
 
 test-otm:
-	./$(TARGET) OTM Entradas/compilador.log 8 2
+	./$(TARGET) OTM Entradas/compilador.log 82
 
-# Testes completos com todos os arquivos
+# Testes completos com todos os 4 arquivos
 test-all:
-	@echo "=== Testes com compilador.log ==="
-	./$(TARGET) LRU Entradas/compilador.log 8 2
-	./$(TARGET) NRU Entradas/compilador.log 8 2
-	./$(TARGET) OTM Entradas/compilador.log 8 2
+	@echo "==============================================="
+	@echo "=== Testes com compilador.log (8KB, 2MB) ==="
+	@echo "==============================================="
+	@./$(TARGET) LRU Entradas/compilador.log 82
 	@echo ""
-	@echo "=== Testes com matriz.log ==="
-	./$(TARGET) LRU Entradas/matriz.log 8 2
-	./$(TARGET) NRU Entradas/matriz.log 8 2
-	./$(TARGET) OTM Entradas/matriz.log 8 2
+	@./$(TARGET) NRU Entradas/compilador.log 82
+	@echo ""
+	@./$(TARGET) OTM Entradas/compilador.log 82
+	@echo ""
+	@echo "==============================================="
+	@echo "=== Testes com matriz.log (8KB, 2MB) ==="
+	@echo "==============================================="
+	@./$(TARGET) LRU Entradas/matriz.log 82
+	@echo ""
+	@./$(TARGET) NRU Entradas/matriz.log 82
+	@echo ""
+	@./$(TARGET) OTM Entradas/matriz.log 82
+	@echo ""
+	@echo "==============================================="
+	@echo "=== Testes com compressor.log (8KB, 2MB) ==="
+	@echo "==============================================="
+	@./$(TARGET) LRU Entradas/compressor.log 82
+	@echo ""
+	@./$(TARGET) NRU Entradas/compressor.log 82
+	@echo ""
+	@./$(TARGET) OTM Entradas/compressor.log 82
+	@echo ""
+	@echo "==============================================="
+	@echo "=== Testes com simulador.log (8KB, 2MB) ==="
+	@echo "==============================================="
+	@./$(TARGET) LRU Entradas/simulador.log 82
+	@echo ""
+	@./$(TARGET) NRU Entradas/simulador.log 82
+	@echo ""
+	@./$(TARGET) OTM Entradas/simulador.log 82
 
-.PHONY: all clean rebuild test-lru test-nru test-otm test-all
+# Testes por arquivo específico
+test-compilador:
+	@echo "=== compilador.log (8KB, 2MB) ==="
+	@./$(TARGET) LRU Entradas/compilador.log 82
+	@./$(TARGET) NRU Entradas/compilador.log 82
+	@./$(TARGET) OTM Entradas/compilador.log 82
+
+test-matriz:
+	@echo "=== matriz.log (8KB, 2MB) ==="
+	@./$(TARGET) LRU Entradas/matriz.log 82
+	@./$(TARGET) NRU Entradas/matriz.log 82
+	@./$(TARGET) OTM Entradas/matriz.log 82
+
+test-compressor:
+	@echo "=== compressor.log (8KB, 2MB) ==="
+	@./$(TARGET) LRU Entradas/compressor.log 82
+	@./$(TARGET) NRU Entradas/compressor.log 82
+	@./$(TARGET) OTM Entradas/compressor.log 82
+
+test-simulador:
+	@echo "=== simulador.log (8KB, 2MB) ==="
+	@./$(TARGET) LRU Entradas/simulador.log 82
+	@./$(TARGET) NRU Entradas/simulador.log 82
+	@./$(TARGET) OTM Entradas/simulador.log 82
+
+# Teste completo com todas as combinações de tamanho
+test-full:
+	@echo "=============================================="
+	@echo "  TESTE COMPLETO - Todas as combinações"
+	@echo "=============================================="
+	@for file in compilador matriz compressor simulador; do \
+		echo ""; \
+		echo "=== $$file.log ==="; \
+		for pag in 8 16 32; do \
+			for mem in 1 2 4; do \
+				echo "--- Pagina: $${pag}KB, Memoria: $${mem}MB ---"; \
+				./$(TARGET) LRU Entradas/$$file.log $${pag}$${mem}; \
+				./$(TARGET) NRU Entradas/$$file.log $${pag}$${mem}; \
+				./$(TARGET) OTM Entradas/$$file.log $${pag}$${mem}; \
+				echo ""; \
+			done; \
+		done; \
+	done
+
+.PHONY: all clean rebuild test-lru test-nru test-otm test-all test-compilador test-matriz test-compressor test-simulador test-full
 
