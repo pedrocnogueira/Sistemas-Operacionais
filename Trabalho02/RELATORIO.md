@@ -6,168 +6,164 @@ Pedro Carneiro Nogueira – 2310540
 
 Hannah Barbosa Goldstein – 2310160
 
----
+## 1. Objetivo
 
-## Objetivo
+O objetivo deste trabalho é implementar um **simulador de memória virtual** em linguagem C, denominado `sim-virtual`. O simulador cria as estruturas de dados e mecanismos de mapeamento de memória (lógico → físico) necessários para realizar a paginação, implementando três algoritmos de substituição de páginas:
 
-Implementar um simulador de memória virtual em linguagem C que realiza a paginação de memória e implementa três algoritmos de substituição de páginas: LRU (Least Recently Used), NRU (Not Recently Used) e o algoritmo Ótimo (Belady).
+- **LRU** (Least Recently Used)
+- **NRU** (Not Recently Used)
+- **Ótimo** (algoritmo de Bélády)
 
-O simulador recebe como entrada um arquivo contendo uma sequência de endereços de memória acessados por um programa real, processa cada acesso para detectar page faults, simula a substituição de páginas e coleta estatísticas sobre o desempenho dos algoritmos.
+O simulador processa uma sequência de acessos à memória (endereços hexadecimais com operações de leitura/escrita), detecta page faults, simula o processo de substituição de páginas e coleta estatísticas para gerar um relatório ao final da execução.
 
-O experimento visa compreender os conceitos de paginação, memória virtual, algoritmos de substituição de páginas e como diferentes estratégias afetam o desempenho do sistema em termos de page faults e escritas no disco.
+**Formato de execução:**
+```
+sim-virtual <algoritmo> <arquivo.log> <tam_pagina> <tam_memoria>
+```
 
----
-
-## Estrutura do Programa
-
-O simulador está organizado em módulos bem definidos, cada um com responsabilidades específicas:
-
-### Módulo: `main.c`
-**Responsabilidade:** Ponto de entrada do programa.
-
-**Funções:**
-- `main(int argc, char *argv[])`: Função principal que coordena a execução do simulador. Parseia argumentos, valida configuração, executa a simulação e imprime o relatório final.
-
-### Módulo: `simulator.c` e `simulator.h`
-**Responsabilidade:** Lógica principal do simulador e gerenciamento da simulação.
-
-**Funções:**
-- `print_usage(const char *program_name)`: Exibe mensagem de uso do programa com exemplos.
-- `parse_arguments(int argc, char *argv[], SimConfig *config)`: Parseia e valida os argumentos de linha de comando (algoritmo, arquivo, tamanhos).
-- `validate_config(SimConfig *config)`: Valida os parâmetros do simulador (tamanhos de página/memória, existência do arquivo) e calcula valores derivados.
-- `run_simulation(SimConfig *config, Statistics *stats)`: Executa o loop principal da simulação, processando cada acesso à memória, detectando page faults e aplicando algoritmos de substituição.
-- `print_report(SimConfig *config, Statistics *stats)`: Imprime o relatório final com configuração e estatísticas.
-
-### Módulo: `page_table.c` e `page_table.h`
-**Responsabilidade:** Gerenciamento da tabela de páginas e quadros físicos.
-
-**Funções:**
-- `page_table_init(unsigned size)`: Aloca e inicializa a tabela de páginas com todas as entradas inválidas.
-- `page_table_free(PageTableEntry *table)`: Libera a memória da tabela de páginas.
-- `frames_init(int num_frames)`: Aloca e inicializa os quadros de página como livres.
-- `frames_free(Frame *frames)`: Libera a memória dos quadros de página.
-- `find_free_frame(Frame *frames, int num_frames)`: Procura e retorna um quadro livre disponível.
-- `load_page(...)`: Carrega uma página em um quadro, atualizando tabela de páginas e metadados do quadro.
-- `invalidate_page(...)`: Remove uma página de um quadro, invalidando-a na tabela de páginas.
-- `update_page_bits(...)`: Atualiza os bits R (referência) e M (modificação) de uma página já em memória.
-- `get_page_index(unsigned address, int offset_bits)`: Calcula o índice da página a partir do endereço lógico (page = addr >> offset_bits).
-- `calculate_offset_bits(int page_size_kb)`: Calcula o número de bits de offset baseado no tamanho da página.
-- `reset_reference_bits(Frame *frames, int num_frames)`: Reseta os bits R de todos os quadros (usado pelo algoritmo NRU).
-
-### Módulo: `algorithms.c` e `algorithms.h`
-**Responsabilidade:** Implementação dos algoritmos de substituição de páginas.
-
-**Funções:**
-- `lru_select_victim(Frame *frames, int num_frames)`: Implementa o algoritmo LRU, selecionando a página menos recentemente acessada.
-- `nru_select_victim(Frame *frames, int num_frames)`: Implementa o algoritmo NRU, classificando páginas em 4 classes (R, M) e selecionando da classe mais baixa.
-- `optimal_select_victim(...)`: Implementa o algoritmo Ótimo (Belady), substituindo a página que será acessada mais tarde no futuro.
-- `select_victim(...)`: Função genérica que seleciona a vítima baseada no algoritmo configurado.
-- `preload_access_log(const char *filename)`: Pré-carrega todo o log de acessos em memória (necessário para o algoritmo Ótimo).
-- `free_access_log(AccessLog *log)`: Libera a memória do log de acessos.
-
-### Módulo: `types.h`
-**Responsabilidade:** Definições de tipos e estruturas de dados.
-
-**Estruturas:**
-- `PageTableEntry`: Representa uma entrada na tabela de páginas (valid, frame_number).
-- `Frame`: Representa um quadro físico (occupied, page_number, R, M, last_access, next_use).
-- `SimConfig`: Configuração do simulador (algoritmo, arquivo, tamanhos, valores derivados).
-- `Statistics`: Estatísticas coletadas (page_faults, dirty_pages_written, total_accesses).
-- `AccessLog`: Log pré-carregado de acessos para o algoritmo Ótimo.
+**Exemplo:**
+```
+sim-virtual LRU compilador.log 8 2
+```
+Executa o simulador com algoritmo LRU, arquivo compilador.log, páginas de 8KB e memória física de 2MB.
 
 ---
 
-## Solução
+## 2. Estrutura do Programa
 
-### Passo 1: Parseamento e Validação de Argumentos
+O programa está organizado em módulos, cada um responsável por uma funcionalidade específica:
 
-O programa recebe 4 argumentos na linha de comando:
-1. **Algoritmo**: LRU, NRU ou OTM (ótimo)
-2. **Arquivo de entrada**: Arquivo .log com sequência de acessos
-3. **Tamanhos combinados**: Formato XY onde X = tamanho da página (KB) e Y = tamanho da memória (MB)
+### 2.1 Arquivos de Cabeçalho (.h)
 
-Exemplo: `sim-virtual LRU arquivo.log 82` significa:
-- Algoritmo: LRU
-- Arquivo: arquivo.log
-- Página: 8 KB
-- Memória: 2 MB
+#### types.h
+Define todas as estruturas de dados utilizadas no simulador:
 
-O parseamento converte o algoritmo para maiúsculas, extrai os tamanhos do argumento combinado e valida todos os parâmetros.
+- **`Algorithm`**: Enumeração dos algoritmos suportados (ALG_LRU, ALG_NRU, ALG_OPTIMAL)
+- **`PageTableEntry`**: Entrada da tabela de páginas com campos `valid` e `frame_number`
+- **`Frame`**: Quadro de página com campos `occupied`, `page_number`, `R` (bit referência), `M` (bit modificação), `last_access` e `next_use`
+- **`SimConfig`**: Configuração do simulador (algoritmo, arquivo, tamanhos, número de quadros)
+- **`Statistics`**: Estatísticas da simulação (page faults, páginas escritas, total de acessos)
+- **`AccessLog`**: Estrutura para pré-carregar acessos (usado pelo algoritmo Ótimo)
 
-### Passo 2: Inicialização das Estruturas de Dados
+#### page_table.h
+Declara funções para gerenciamento da tabela de páginas e quadros:
 
-O simulador inicializa:
-- **Tabela de páginas**: Array com 2^(32 - offset_bits) entradas, todas inicialmente inválidas
-- **Quadros físicos**: Array com (memória_mb * 1024) / page_size_kb quadros, todos livres
-- **Estatísticas**: Contadores zerados (page_faults, dirty_pages_written, total_accesses)
+- `page_table_init()` / `page_table_free()`: Alocação e liberação da tabela
+- `frames_init()` / `frames_free()`: Alocação e liberação dos quadros
+- `find_free_frame()`: Busca quadro livre
+- `load_page()`: Carrega página em um quadro
+- `invalidate_page()`: Remove página de um quadro
+- `update_page_bits()`: Atualiza bits R e M
+- `get_page_index()`: Calcula índice da página a partir do endereço
+- `calculate_offset_bits()`: Calcula bits de offset (s) para o tamanho de página
+- `reset_reference_bits()`: Reseta bits R (usado pelo NRU)
 
-Para o algoritmo Ótimo, o log de acessos é pré-carregado completamente em memória para permitir "olhar o futuro".
+#### algorithms.h
+Declara funções dos algoritmos de substituição:
 
-### Passo 3: Cálculo do Índice da Página
+- `lru_select_victim()`: Seleção de vítima pelo LRU
+- `nru_select_victim()`: Seleção de vítima pelo NRU
+- `optimal_select_victim()`: Seleção de vítima pelo algoritmo Ótimo
+- `select_victim()`: Função genérica que chama o algoritmo apropriado
+- `preload_access_log()` / `free_access_log()`: Carregamento do log para o Ótimo
 
-Para cada acesso, o índice da página é calculado descartando os bits menos significativos:
+#### simulator.h
+Declara funções da lógica principal:
+
+- `run_simulation()`: Executa a simulação completa
+- `print_report()`: Imprime o relatório final
+- `parse_arguments()`: Processa argumentos de linha de comando
+- `print_usage()`: Exibe mensagem de uso
+- `validate_config()`: Valida parâmetros de configuração
+
+### 2.2 Arquivos de Implementação (.c)
+
+#### main.c
+Ponto de entrada do programa. Realiza o parsing dos argumentos, valida a configuração, executa a simulação e imprime o relatório.
+
+#### page_table.c
+Implementa o gerenciamento da tabela de páginas e quadros físicos, incluindo:
+- Alocação dinâmica das estruturas
+- Mapeamento página → quadro
+- Cálculo do índice de página: `page = addr >> s`
+
+#### algorithms.c
+Implementa os três algoritmos de substituição de páginas:
+- **LRU**: Percorre todos os quadros e seleciona aquele com menor `last_access`
+- **NRU**: Classifica páginas em 4 classes baseado nos bits R e M, seleciona da classe mais baixa
+- **Ótimo**: Para cada quadro, busca no futuro quando a página será acessada novamente
+
+#### simulator.c
+Implementa o loop principal de simulação e funções auxiliares. Processa cada acesso à memória, detecta page faults e invoca os algoritmos de substituição quando necessário.
+
+---
+
+## 3. Solução
+
+### 3.1 Fluxo de Execução
+
 ```
-page_index = address >> offset_bits
+1. Parsing de argumentos
+2. Validação de parâmetros
+3. Cálculo de valores derivados:
+   - Bits de offset (s): 8KB→13, 16KB→14, 32KB→15
+   - Número de quadros: (memoria_MB × 1024) / pagina_KB
+4. Alocação de estruturas (tabela de páginas, quadros)
+5. Para algoritmo Ótimo: pré-carrega todo o arquivo de acessos
+6. Loop principal de simulação:
+   a. Lê endereço e operação (R/W)
+   b. Calcula índice da página: page = addr >> s
+   c. Se página está em memória (hit):
+      - Atualiza bits R e M
+   d. Se página não está em memória (page fault):
+      - Incrementa contador de page faults
+      - Se há quadro livre: usa-o
+      - Senão: seleciona vítima pelo algoritmo
+        - Se página vítima é suja (M=1): conta escrita
+        - Invalida página vítima
+      - Carrega nova página no quadro
+   e. Incrementa contador de tempo
+7. Imprime relatório final
 ```
 
-Onde `offset_bits` é calculado como:
-- 8 KB = 8192 bytes = 2^13 → offset_bits = 13
-- 16 KB = 16384 bytes = 2^14 → offset_bits = 14
-- 32 KB = 32768 bytes = 2^15 → offset_bits = 15
+### 3.2 Algoritmos de Substituição
 
-### Passo 4: Processamento de Cada Acesso
-
-Para cada linha do arquivo de entrada (formato: endereço hexadecimal + R/W):
-
-1. **Cálculo da página**: Extrai o índice da página do endereço
-2. **Verificação de hit/miss**:
-   - Se `page_table[page].valid == 1`: **Hit** - página está em memória
-     - Atualiza bit R = 1
-     - Se operação for W, atualiza bit M = 1
-     - Atualiza `last_access` (para LRU)
-   - Se `page_table[page].valid == 0`: **Page Fault** - página não está em memória
-
-### Passo 5: Tratamento de Page Fault
-
-Quando ocorre um page fault:
-
-1. **Procura quadro livre**:
-   - Se há quadros livres (`frames_used < num_frames`), usa um quadro livre
-   - Senão, precisa substituir uma página usando o algoritmo configurado
-
-2. **Seleção de vítima** (quando todos os quadros estão ocupados):
-   - **LRU**: Seleciona quadro com menor `last_access`
-   - **NRU**: Classifica páginas em 4 classes (R=0,M=0; R=0,M=1; R=1,M=0; R=1,M=1) e seleciona da classe mais baixa não vazia
-   - **Ótimo**: Para cada quadro, encontra quando sua página será usada novamente no futuro; seleciona a que será usada mais tarde (ou nunca)
-
-3. **Substituição**:
-   - Se página vítima tem M=1, incrementa contador de páginas escritas
-   - Invalida página vítima na tabela de páginas
-   - Carrega nova página no quadro
-
-4. **Atualização**:
-   - Marca página como válida na tabela de páginas
-   - Atualiza metadados do quadro (R=1, M conforme operação, last_access)
-
-### Passo 6: Reset Periódico (NRU)
-
-Para o algoritmo NRU, a cada 1000 acessos, todos os bits R são resetados para 0, permitindo classificar páginas como "não referenciadas recentemente".
-
-### Passo 7: Geração do Relatório
-
-Ao final do processamento, o simulador imprime:
-- Configuração utilizada (arquivo, memória, página, algoritmo)
-- Número de faltas de páginas (page faults)
-- Número de páginas escritas no disco (apenas páginas sujas substituídas)
-
-### Exemplos de Execução
-
-#### Exemplo 1: Algoritmo LRU
+#### LRU (Least Recently Used)
+Seleciona a página que foi acessada há mais tempo:
 ```
-$ ./sim-virtual LRU Entradas/compilador.log 82
+para cada quadro ocupado:
+    se last_access < menor_tempo:
+        menor_tempo = last_access
+        vitima = quadro
+retorna vitima
+```
 
+#### NRU (Not Recently Used)
+Classifica páginas em 4 classes e seleciona da classe mais baixa:
+- Classe 0: R=0, M=0 (não referenciada, não modificada)
+- Classe 1: R=0, M=1 (não referenciada, modificada)
+- Classe 2: R=1, M=0 (referenciada, não modificada)
+- Classe 3: R=1, M=1 (referenciada, modificada)
+
+Os bits R são resetados periodicamente (a cada 1000 acessos).
+
+#### Algoritmo Ótimo (Bélády)
+Seleciona a página que será acessada mais tarde no futuro:
+```
+para cada quadro ocupado:
+    procura no futuro quando página será usada
+    se nunca será usada: retorna este quadro
+    se será usada mais tarde que as outras: marca como vitima
+retorna vitima
+```
+
+### 4.3 Saída do Programa
+
+Exemplo de execução:
+```
+$ ./sim-virtual LRU compilador.log 8 2
 Executando o simulador...
-Arquivo de entrada: Entradas/compilador.log
+Arquivo de entrada: compilador.log
 Tamanho da memoria fisica: 2 MB
 Tamanho das paginas: 8 KB
 Algoritmo de substituicao: LRU
@@ -175,116 +171,110 @@ Numero de Faltas de Paginas: 21091
 Numero de Paginas Escritas: 3839
 ```
 
-**Análise:** O algoritmo LRU processou o arquivo compilador.log com páginas de 8 KB e memória de 2 MB. Ocorreram 21.091 page faults, sendo que 3.839 páginas sujas precisaram ser escritas de volta no disco quando substituídas.
+### 3.4 Resultados dos Testes
 
-#### Exemplo 2: Algoritmo NRU
-```
-$ ./sim-virtual NRU Entradas/matriz.log 164
+#### Tabela Comparativa - compilador.log
 
-Executando o simulador...
-Arquivo de entrada: Entradas/matriz.log
-Tamanho da memoria fisica: 4 MB
-Tamanho das paginas: 16 KB
-Algoritmo de substituicao: NRU
-Numero de Faltas de Paginas: 12692
-Numero de Paginas Escritas: 1495
-```
+| Página | Memória | LRU (PF) | LRU (PE) | NRU (PF) | NRU (PE) | OTM (PF) | OTM (PE) |
+|--------|---------|----------|----------|----------|----------|----------|----------|
+| 8KB    | 1MB     | 36707    | 5775     | 42046    | 4529     | 21271    | 3711     |
+| 8KB    | 2MB     | 21091    | 3839     | 38503    | 3276     | 10118    | 2190     |
+| 8KB    | 4MB     | 7632     | 1756     | 32561    | 1689     | 4232     | 1078     |
+| 16KB   | 1MB     | 47424    | 7770     | 63926    | 7254     | 29650    | 4882     |
+| 16KB   | 2MB     | 30686    | 5068     | 36317    | 3968     | 17049    | 3233     |
+| 16KB   | 4MB     | 15873    | 3123     | 33751    | 2775     | 7116     | 1665     |
+| 32KB   | 1MB     | 60336    | 9429     | 126246   | 8577     | 38814    | 6203     |
+| 32KB   | 2MB     | 38641    | 6186     | 46536    | 5804     | 23758    | 3750     |
+| 32KB   | 4MB     | 23928    | 3826     | 30859    | 3125     | 12570    | 2431     |
 
-**Análise:** O algoritmo NRU processou o arquivo matriz.log com páginas de 16 KB e memória de 4 MB. Ocorreram 12.692 page faults, com 1.495 páginas sujas escritas.
+#### Tabela Comparativa - matriz.log
 
-#### Exemplo 3: Algoritmo Ótimo
-```
-$ ./sim-virtual OTM Entradas/compressor.log 321
+| Página | Memória | LRU (PF) | LRU (PE) | NRU (PF) | NRU (PE) | OTM (PF) | OTM (PE) |
+|--------|---------|----------|----------|----------|----------|----------|----------|
+| 8KB    | 1MB     | 10928    | 3273     | 17315    | 2467     | 5361     | 1827     |
+| 8KB    | 2MB     | 4745     | 1623     | 14824    | 1653     | 2969     | 1109     |
+| 8KB    | 4MB     | 2950     | 985      | 12139    | 1066     | 2295     | 843      |
+| 16KB   | 1MB     | 15904    | 4517     | 20589    | 3632     | 9914     | 3157     |
+| 16KB   | 2MB     | 7876     | 2585     | 15138    | 2104     | 4136     | 1482     |
+| 16KB   | 4MB     | 3828     | 1319     | 12692    | 1495     | 2370     | 944      |
+| 32KB   | 1MB     | 32282    | 6582     | 63283    | 5418     | 19115    | 4787     |
+| 32KB   | 2MB     | 13230    | 3877     | 16726    | 2860     | 8008     | 2618     |
+| 32KB   | 4MB     | 5974     | 2011     | 13083    | 1744     | 3301     | 1171     |
 
-Executando o simulador...
-Arquivo de entrada: Entradas/compressor.log
-Tamanho da memoria fisica: 1 MB
-Tamanho das paginas: 32 KB
-Algoritmo de substituicao: OTM
-Numero de Faltas de Paginas: 607
-Numero de Paginas Escritas: 250
-```
+#### Tabela Comparativa - compressor.log
 
-**Análise:** O algoritmo Ótimo processou o arquivo compressor.log com páginas de 32 KB e memória de 1 MB. Ocorreram apenas 607 page faults (menor número possível para esta sequência), com 250 páginas sujas escritas.
+| Página | Memória | LRU (PF) | LRU (PE) | NRU (PF) | NRU (PE) | OTM (PF) | OTM (PE) |
+|--------|---------|----------|----------|----------|----------|----------|----------|
+| 8KB    | 1MB     | 533      | 132      | 917      | 18       | 345      | 86       |
+| 8KB    | 2MB     | 255      | 0        | 255      | 0        | 255      | 0        |
+| 8KB    | 4MB     | 255      | 0        | 255      | 0        | 255      | 0        |
+| 16KB   | 1MB     | 729      | 265      | 1189     | 235      | 483      | 166      |
+| 16KB   | 2MB     | 366      | 86       | 710      | 0        | 239      | 55       |
+| 16KB   | 4MB     | 209      | 0        | 209      | 0        | 209      | 0        |
+| 32KB   | 1MB     | 911      | 345      | 1786     | 452      | 607      | 250      |
+| 32KB   | 2MB     | 515      | 180      | 812      | 146      | 334      | 109      |
+| 32KB   | 4MB     | 231      | 41       | 442      | 0        | 172      | 34       |
 
-### Comparação de Resultados
+#### Tabela Comparativa - simulador.log
 
-Testando os três algoritmos com a mesma configuração (compilador.log, 8KB, 2MB):
+| Página | Memória | LRU (PF) | LRU (PE) | NRU (PF) | NRU (PE) | OTM (PF) | OTM (PE) |
+|--------|---------|----------|----------|----------|----------|----------|----------|
+| 8KB    | 1MB     | 16479    | 5546     | 24897    | 6000     | 9179     | 3528     |
+| 8KB    | 2MB     | 8556     | 3395     | 22524    | 4506     | 4748     | 2160     |
+| 8KB    | 4MB     | 4732     | 2094     | 20969    | 3969     | 3498     | 1620     |
+| 16KB   | 1MB     | 29547    | 8267     | 34351    | 8403     | 15284    | 5427     |
+| 16KB   | 2MB     | 12822    | 4813     | 21775    | 5671     | 7269     | 3017     |
+| 16KB   | 4MB     | 6520     | 2859     | 19982    | 4367     | 3833     | 1838     |
+| 32KB   | 1MB     | 48088    | 10446    | 71393    | 10589    | 28328    | 7581     |
+| 32KB   | 2MB     | 22126    | 7003     | 26558    | 7075     | 11870    | 4421     |
+| 32KB   | 4MB     | 9348     | 3744     | 18462    | 4820     | 5305     | 2312     |
 
-- **LRU**: 21.091 page faults, 3.839 escritas
-- **NRU**: 38.503 page faults, 3.276 escritas  
-- **Ótimo**: 10.118 page faults, 2.190 escritas
+#### Resumo Comparativo (8KB, 2MB)
 
-**Observação:** O algoritmo ótimo sempre apresenta o menor número de page faults, pois tem conhecimento do futuro. LRU geralmente supera NRU por ser mais preciso na estimativa de páginas recentemente usadas.
+| Arquivo        | LRU (PF) | NRU (PF) | OTM (PF) |
+|----------------|----------|----------|----------|
+| compilador.log | 21091    | 38503    | 10118    |
+| matriz.log     | 4745     | 14824    | 2969     |
+| compressor.log | 255      | 255      | 255      |
+| simulador.log  | 8556     | 22524    | 4748     |
+
+*PF = Page Faults, PE = Páginas Escritas (sujas)*
 
 ---
 
-## Observações e Conclusões
+## 4. Observações e Conclusões
 
-### Facilidades Encontradas
+### 4.1 Análise dos Resultados
 
-1. **Estrutura modular**: A divisão em módulos bem definidos facilitou o desenvolvimento e manutenção do código. Cada módulo tem responsabilidade clara, tornando o código mais legível e testável.
+1. **Algoritmo Ótimo**: Sempre apresenta o menor número de page faults, como esperado. É o limite inferior teórico, pois conhece todos os acessos futuros (algoritmo de Bélády). Serve como referência para avaliar os outros algoritmos.
 
-2. **Algoritmos LRU e NRU**: A implementação desses algoritmos foi relativamente direta, pois não requerem conhecimento do futuro. LRU usa apenas o timestamp do último acesso, enquanto NRU usa os bits R e M já presentes na estrutura.
+2. **Algoritmo LRU**: Apresenta desempenho intermediário, aproximando-se do ótimo em cargas de trabalho com boa localidade temporal. É uma aproximação prática do algoritmo ótimo.
 
-3. **Cálculo de índices**: O cálculo do índice da página através de shift de bits é eficiente e direto, facilitando a implementação.
+3. **Algoritmo NRU**: Mais simples mas menos preciso, resultando em mais page faults na maioria dos casos. Sua vantagem é a simplicidade de implementação.
 
-4. **Validação de entrada**: O sistema de validação robusto ajuda a identificar erros rapidamente e fornece mensagens claras ao usuário.
+4. **Efeito do tamanho da memória**: Aumentar a memória física reduz significativamente os page faults para todos os algoritmos. Isso é esperado, pois mais quadros permitem manter mais páginas em memória.
 
-### Dificuldades Encontradas
+5. **Efeito do tamanho da página**: Páginas maiores podem aumentar page faults devido a:
+   - Menor número de quadros disponíveis (menos páginas cabem na memória)
+   - Fragmentação interna (desperdício de espaço dentro das páginas)
 
-1. **Algoritmo Ótimo**: A principal dificuldade foi garantir que o índice usado para "olhar o futuro" correspondesse corretamente à posição atual no log. Inicialmente, o código usava o contador `time` como índice, mas isso não funcionava corretamente. A solução foi criar um índice separado (`access_index`) e, para o algoritmo ótimo, ler do log pré-carregado em vez do arquivo diretamente.
+6. **Caso especial - compressor.log**: O compressor acessa apenas ~255 páginas distintas (com páginas de 8KB). Com 2MB de memória (256 quadros), todas as páginas cabem na memória, resultando em apenas faltas compulsórias (inevitáveis no primeiro acesso). Por isso, todos os algoritmos apresentam o mesmo resultado.
 
-2. **Pré-carregamento do log**: O algoritmo ótimo requer carregar todo o arquivo de log em memória, o que pode ser problemático para arquivos muito grandes. Foi necessário implementar uma função que conta as linhas primeiro, depois aloca memória e carrega os dados.
+### 4.2 Dificuldades Encontradas
 
-3. **Reset periódico do NRU**: Decidir o intervalo de reset dos bits R (1000 acessos) foi uma escolha de design. Valores muito pequenos podem degradar o desempenho, enquanto valores muito grandes podem não criar as classes NRU adequadamente.
+- **Algoritmo Ótimo**: A implementação requer pré-carregar todo o arquivo de acessos na memória para poder "olhar o futuro", o que aumenta o consumo de memória do simulador.
+- **Tamanho da tabela de páginas**: Com endereços de 32 bits e páginas de 8KB (13 bits de offset), a tabela pode ter até 2^19 entradas, exigindo alocação dinâmica cuidadosa.
 
-4. **Tamanho da tabela de páginas**: Para páginas de 8 KB, a tabela pode ter até 2^19 entradas (meio milhão), o que é aceitável para simulação mas requer atenção na alocação de memória.
+### 4.3 O Que Funciona
 
-### Resultados dos Testes
+- Todos os três algoritmos de substituição (LRU, NRU, Ótimo)
+- Todos os tamanhos de página suportados (8, 16, 32 KB)
+- Todos os tamanhos de memória suportados (1, 2, 4 MB)
+- Leitura correta dos arquivos de log
+- Contagem precisa de page faults e páginas sujas
+- Validação de parâmetros de entrada
 
-#### O que funciona:
+### 4.4 Conclusão
 
-✅ **Todos os algoritmos funcionam corretamente**:
-- LRU seleciona corretamente a página menos recentemente usada
-- NRU classifica e seleciona páginas das classes corretas
-- Ótimo encontra e substitui a página que será usada mais tarde
-
-✅ **Cálculo de índices**: Funciona corretamente para todos os tamanhos de página (8, 16, 32 KB)
-
-✅ **Atualização de bits R e M**: Bits são atualizados corretamente em hits e page faults
-
-✅ **Contagem de estatísticas**: Page faults e páginas escritas são contados corretamente
-
-✅ **Validação de entrada**: Rejeita argumentos inválidos e fornece mensagens de erro claras
-
-✅ **Suporte a diferentes configurações**: Funciona com todas as combinações de tamanhos de página (8, 16, 32 KB) e memória (1, 2, 4 MB)
-
-✅ **Formato de saída**: Gera relatório no formato especificado no enunciado
-
-#### Comportamento esperado observado:
-
-1. **Algoritmo ótimo sempre tem menos page faults**: Confirmado nos testes. O algoritmo ótimo sempre apresenta o menor número de page faults, servindo como referência teórica.
-
-2. **LRU geralmente supera NRU**: Confirmado. LRU é mais preciso que NRU na maioria dos casos, resultando em menos page faults.
-
-3. **Mais memória → menos page faults**: Confirmado. Aumentar o tamanho da memória física reduz o número de page faults, pois mais páginas podem permanecer em memória.
-
-4. **Tamanho de página afeta resultados**: Confirmado. O tamanho da página influencia o número de page faults dependendo do padrão de acesso do programa (localidade espacial).
-
-### Conclusões
-
-O simulador foi implementado com sucesso e atende a todos os requisitos do enunciado. Os três algoritmos de substituição de páginas foram implementados corretamente e produzem resultados consistentes.
-
-**Principais aprendizados:**
-
-1. **Algoritmo ótimo como referência**: O algoritmo ótimo, embora impossível de implementar em sistemas reais, serve como referência teórica valiosa para avaliar outros algoritmos.
-
-2. **Trade-offs entre algoritmos**: LRU oferece melhor desempenho que NRU, mas requer mais overhead (atualização de timestamps). NRU é mais simples e eficiente, mas menos preciso.
-
-3. **Impacto da configuração**: Tanto o tamanho da página quanto o tamanho da memória física têm impacto significativo no desempenho, demonstrando a importância de escolher configurações adequadas para cada tipo de aplicação.
-
-4. **Localidade de referência**: Programas com boa localidade temporal (LRU funciona bem) e espacial (páginas maiores ajudam) apresentam menos page faults.
-
-O código está bem estruturado, documentado e pronto para uso. A implementação modular facilita futuras extensões, como adicionar novos algoritmos de substituição ou métricas de desempenho adicionais.
+O simulador foi implementado com sucesso, permitindo comparar o desempenho dos três algoritmos de substituição de páginas em diferentes configurações de memória. Os resultados confirmam a teoria: o algoritmo Ótimo é inalcançável na prática (requer conhecimento do futuro), mas o LRU oferece uma boa aproximação. O NRU, apesar de mais simples, pode ser uma opção viável quando a sobrecarga do LRU não é aceitável.
 
