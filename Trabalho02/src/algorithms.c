@@ -65,7 +65,7 @@ int nru_select_victim(Frame *frames, int num_frames) {
  * Substitui a página que será acessada mais tarde no futuro
  */
 int optimal_select_victim(Frame *frames, int num_frames, 
-                          PageTableEntry *page_table __attribute__((unused)), 
+                          PageTableEntry *page_table, 
                           AccessLog *log, 
                           unsigned current_index, int offset_bits) {
     
