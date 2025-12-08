@@ -154,23 +154,41 @@ void run_simulation(SimConfig *config, Statistics *stats) {
         }
     }
     
-    /* Abre arquivo de entrada */
-    FILE *file = fopen(config->input_file, "r");
-    if (file == NULL) {
-        fprintf(stderr, "Erro: Não foi possível abrir arquivo: %s\n", config->input_file);
-        page_table_free(page_table);
-        frames_free(frames);
-        free_access_log(access_log);
-        return;
+    /* Abre arquivo de entrada (ou usa log pré-carregado para ótimo) */
+    FILE *file = NULL;
+    if (config->algorithm != ALG_OPTIMAL) {
+        file = fopen(config->input_file, "r");
+        if (file == NULL) {
+            fprintf(stderr, "Erro: Não foi possível abrir arquivo: %s\n", config->input_file);
+            page_table_free(page_table);
+            frames_free(frames);
+            free_access_log(access_log);
+            return;
+        }
     }
     
     unsigned time = 0;
     unsigned addr;
     char rw;
     int frames_used = 0;
+    unsigned access_index = 0;
     
     /* Loop principal de simulação */
-    while (fscanf(file, "%x %c", &addr, &rw) == 2) {
+    int continue_loop = 1;
+    while (continue_loop) {
+        /* Lê acesso do arquivo ou do log pré-carregado */
+        if (config->algorithm == ALG_OPTIMAL) {
+            if (access_index >= access_log->count) {
+                break;
+            }
+            addr = access_log->addresses[access_index];
+            rw = access_log->operations[access_index];
+        } else {
+            if (fscanf(file, "%x %c", &addr, &rw) != 2) {
+                break;
+            }
+        }
+        
         unsigned page = get_page_index(addr, config->page_offset_bits);
         stats->total_accesses++;
         
@@ -191,7 +209,7 @@ void run_simulation(SimConfig *config, Statistics *stats) {
             } else {
                 /* Precisa substituir uma página */
                 frame = select_victim(frames, config->num_frames, config->algorithm,
-                                       page_table, access_log, time, 
+                                       page_table, access_log, access_index, 
                                        config->page_offset_bits);
                 
                 /* Se página vítima foi modificada, conta escrita no disco */
@@ -218,10 +236,13 @@ void run_simulation(SimConfig *config, Statistics *stats) {
         }
         
         time++;
+        access_index++;
     }
     
     /* Limpa recursos */
-    fclose(file);
+    if (file != NULL) {
+        fclose(file);
+    }
     page_table_free(page_table);
     frames_free(frames);
     free_access_log(access_log);
