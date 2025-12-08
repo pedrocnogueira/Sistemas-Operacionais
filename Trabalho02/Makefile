@@ -56,76 +56,76 @@ LOGS = compilador matriz compressor simulador
 
 # Testes rápidos (um arquivo, um algoritmo)
 test-lru:
-	./$(TARGET) LRU Entradas/compilador.log 82
+	./$(TARGET) LRU Entradas/compilador.log 8 2
 
 test-nru:
-	./$(TARGET) NRU Entradas/compilador.log 82
+	./$(TARGET) NRU Entradas/compilador.log 8 2
 
 test-otm:
-	./$(TARGET) OTM Entradas/compilador.log 82
+	./$(TARGET) OTM Entradas/compilador.log 8 2
 
 # Testes completos com todos os 4 arquivos
 test-all:
 	@echo "==============================================="
 	@echo "=== Testes com compilador.log (8KB, 2MB) ==="
 	@echo "==============================================="
-	@./$(TARGET) LRU Entradas/compilador.log 82
+	@./$(TARGET) LRU Entradas/compilador.log 8 2
 	@echo ""
-	@./$(TARGET) NRU Entradas/compilador.log 82
+	@./$(TARGET) NRU Entradas/compilador.log 8 2
 	@echo ""
-	@./$(TARGET) OTM Entradas/compilador.log 82
+	@./$(TARGET) OTM Entradas/compilador.log 8 2
 	@echo ""
 	@echo "==============================================="
 	@echo "=== Testes com matriz.log (8KB, 2MB) ==="
 	@echo "==============================================="
-	@./$(TARGET) LRU Entradas/matriz.log 82
+	@./$(TARGET) LRU Entradas/matriz.log 8 2
 	@echo ""
-	@./$(TARGET) NRU Entradas/matriz.log 82
+	@./$(TARGET) NRU Entradas/matriz.log 8 2
 	@echo ""
-	@./$(TARGET) OTM Entradas/matriz.log 82
+	@./$(TARGET) OTM Entradas/matriz.log 8 2
 	@echo ""
 	@echo "==============================================="
 	@echo "=== Testes com compressor.log (8KB, 2MB) ==="
 	@echo "==============================================="
-	@./$(TARGET) LRU Entradas/compressor.log 82
+	@./$(TARGET) LRU Entradas/compressor.log 8 2
 	@echo ""
-	@./$(TARGET) NRU Entradas/compressor.log 82
+	@./$(TARGET) NRU Entradas/compressor.log 8 2
 	@echo ""
-	@./$(TARGET) OTM Entradas/compressor.log 82
+	@./$(TARGET) OTM Entradas/compressor.log 8 2
 	@echo ""
 	@echo "==============================================="
 	@echo "=== Testes com simulador.log (8KB, 2MB) ==="
 	@echo "==============================================="
-	@./$(TARGET) LRU Entradas/simulador.log 82
+	@./$(TARGET) LRU Entradas/simulador.log 8 2
 	@echo ""
-	@./$(TARGET) NRU Entradas/simulador.log 82
+	@./$(TARGET) NRU Entradas/simulador.log 8 2
 	@echo ""
-	@./$(TARGET) OTM Entradas/simulador.log 82
+	@./$(TARGET) OTM Entradas/simulador.log 8 2
 
 # Testes por arquivo específico
 test-compilador:
 	@echo "=== compilador.log (8KB, 2MB) ==="
-	@./$(TARGET) LRU Entradas/compilador.log 82
-	@./$(TARGET) NRU Entradas/compilador.log 82
-	@./$(TARGET) OTM Entradas/compilador.log 82
+	@./$(TARGET) LRU Entradas/compilador.log 8 2
+	@./$(TARGET) NRU Entradas/compilador.log 8 2
+	@./$(TARGET) OTM Entradas/compilador.log 8 2
 
 test-matriz:
 	@echo "=== matriz.log (8KB, 2MB) ==="
-	@./$(TARGET) LRU Entradas/matriz.log 82
-	@./$(TARGET) NRU Entradas/matriz.log 82
-	@./$(TARGET) OTM Entradas/matriz.log 82
+	@./$(TARGET) LRU Entradas/matriz.log 8 2
+	@./$(TARGET) NRU Entradas/matriz.log 8 2
+	@./$(TARGET) OTM Entradas/matriz.log 8 2
 
 test-compressor:
 	@echo "=== compressor.log (8KB, 2MB) ==="
-	@./$(TARGET) LRU Entradas/compressor.log 82
-	@./$(TARGET) NRU Entradas/compressor.log 82
-	@./$(TARGET) OTM Entradas/compressor.log 82
+	@./$(TARGET) LRU Entradas/compressor.log 8 2
+	@./$(TARGET) NRU Entradas/compressor.log 8 2
+	@./$(TARGET) OTM Entradas/compressor.log 8 2
 
 test-simulador:
 	@echo "=== simulador.log (8KB, 2MB) ==="
-	@./$(TARGET) LRU Entradas/simulador.log 82
-	@./$(TARGET) NRU Entradas/simulador.log 82
-	@./$(TARGET) OTM Entradas/simulador.log 82
+	@./$(TARGET) LRU Entradas/simulador.log 8 2
+	@./$(TARGET) NRU Entradas/simulador.log 8 2
+	@./$(TARGET) OTM Entradas/simulador.log 8 2
 
 # Teste completo com todas as combinações de tamanho
 test-full:
@@ -138,9 +138,9 @@ test-full:
 		for pag in 8 16 32; do \
 			for mem in 1 2 4; do \
 				echo "--- Pagina: $${pag}KB, Memoria: $${mem}MB ---"; \
-				./$(TARGET) LRU Entradas/$$file.log $${pag}$${mem}; \
-				./$(TARGET) NRU Entradas/$$file.log $${pag}$${mem}; \
-				./$(TARGET) OTM Entradas/$$file.log $${pag}$${mem}; \
+				./$(TARGET) LRU Entradas/$$file.log $${pag} $${mem}; \
+				./$(TARGET) NRU Entradas/$$file.log $${pag} $${mem}; \
+				./$(TARGET) OTM Entradas/$$file.log $${pag} $${mem}; \
 				echo ""; \
 			done; \
 		done; \

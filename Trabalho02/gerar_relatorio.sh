@@ -54,9 +54,9 @@ extrair_resultado() {
         for pag in "${PAGINAS[@]}"; do
             for mem in "${MEMORIAS[@]}"; do
                 # Executa os três algoritmos
-                resultado_lru=$($SIMULADOR LRU "$ENTRADAS_DIR/${arquivo}.log" "${pag}${mem}" 2>/dev/null)
-                resultado_nru=$($SIMULADOR NRU "$ENTRADAS_DIR/${arquivo}.log" "${pag}${mem}" 2>/dev/null)
-                resultado_otm=$($SIMULADOR OTM "$ENTRADAS_DIR/${arquivo}.log" "${pag}${mem}" 2>/dev/null)
+                resultado_lru=$($SIMULADOR LRU "$ENTRADAS_DIR/${arquivo}.log" "${pag}" "${mem}" 2>/dev/null)
+                resultado_nru=$($SIMULADOR NRU "$ENTRADAS_DIR/${arquivo}.log" "${pag}" "${mem}" 2>/dev/null)
+                resultado_otm=$($SIMULADOR OTM "$ENTRADAS_DIR/${arquivo}.log" "${pag}" "${mem}" 2>/dev/null)
                 
                 # Extrai os valores
                 read lru_pf lru_pe <<< $(extrair_resultado "$resultado_lru")
@@ -85,9 +85,9 @@ extrair_resultado() {
     printf "%-15s-+-%-12s-+-%-12s-+-%-12s-+\n" "---------------" "------------" "------------" "------------"
     
     for arquivo in "${ARQUIVOS[@]}"; do
-        resultado_lru=$($SIMULADOR LRU "$ENTRADAS_DIR/${arquivo}.log" 82 2>/dev/null)
-        resultado_nru=$($SIMULADOR NRU "$ENTRADAS_DIR/${arquivo}.log" 82 2>/dev/null)
-        resultado_otm=$($SIMULADOR OTM "$ENTRADAS_DIR/${arquivo}.log" 82 2>/dev/null)
+        resultado_lru=$($SIMULADOR LRU "$ENTRADAS_DIR/${arquivo}.log" 8 2 2>/dev/null)
+        resultado_nru=$($SIMULADOR NRU "$ENTRADAS_DIR/${arquivo}.log" 8 2 2>/dev/null)
+        resultado_otm=$($SIMULADOR OTM "$ENTRADAS_DIR/${arquivo}.log" 8 2 2>/dev/null)
         
         read lru_pf lru_pe <<< $(extrair_resultado "$resultado_lru")
         read nru_pf nru_pe <<< $(extrair_resultado "$resultado_nru")

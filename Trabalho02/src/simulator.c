@@ -13,7 +13,7 @@
  * Exibe mensagem de uso do programa
  */
 void print_usage(const char *program_name) {
-    printf("Uso: %s <algoritmo> <arquivo.log> <tam_pagina><tam_memoria>\n", program_name);
+    printf("Uso: %s <algoritmo> <arquivo.log> <tam_pagina> <tam_memoria>\n", program_name);
     printf("\n");
     printf("Argumentos:\n");
     printf("  algoritmo    : LRU, NRU ou OTM (ótimo)\n");
@@ -21,17 +21,16 @@ void print_usage(const char *program_name) {
     printf("  tam_pagina   : tamanho da página em KB (8, 16 ou 32)\n");
     printf("  tam_memoria  : tamanho da memória física em MB (1, 2 ou 4)\n");
     printf("\n");
-    printf("Exemplo: %s LRU arquivo.log 82\n", program_name);
+    printf("Exemplo: %s LRU arquivo.log 8 2\n", program_name);
     printf("         (página de 8KB, memória de 2MB, algoritmo LRU)\n");
 }
 
 /*
  * Parseia os argumentos de linha de comando
- * Formato: sim-virtual <alg> <arquivo> <tam_pag><tam_mem>
- * O último argumento combina tamanho de página e memória (ex: 82 = 8KB e 2MB)
+ * Formato: sim-virtual <alg> <arquivo> <tam_pag> <tam_mem>
  */
 int parse_arguments(int argc, char *argv[], SimConfig *config) {
-    if (argc != 4) {
+    if (argc != 5) {
         return 0;
     }
     
@@ -64,24 +63,11 @@ int parse_arguments(int argc, char *argv[], SimConfig *config) {
     strncpy(config->input_file, argv[2], MAX_FILENAME - 1);
     config->input_file[MAX_FILENAME - 1] = '\0';
     
-    /* Tamanho de página e memória (formato: XY onde X = página, Y = memória) */
-    char *sizes = argv[3];
-    int len = strlen(sizes);
+    /* Tamanho de página (em KB) */
+    config->page_size_kb = atoi(argv[3]);
     
-    if (len < 2) {
-        fprintf(stderr, "Erro: Formato inválido para tamanhos. Use: <tam_pag><tam_mem>\n");
-        return 0;
-    }
-    
-    /* Último caractere é o tamanho da memória */
-    char mem_char = sizes[len - 1];
-    config->memory_size_mb = mem_char - '0';
-    
-    /* Caracteres anteriores são o tamanho da página */
-    char page_str[10];
-    strncpy(page_str, sizes, len - 1);
-    page_str[len - 1] = '\0';
-    config->page_size_kb = atoi(page_str);
+    /* Tamanho de memória (em MB) */
+    config->memory_size_mb = atoi(argv[4]);
     
     return 1;
 }
